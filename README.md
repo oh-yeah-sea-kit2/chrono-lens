@@ -38,3 +38,45 @@ Flutter (Mobile) <--WebSocket--> Python GPU Server
 2. **Phase 2**: SD1.5 + LCM 推論パイプライン構築
 3. **Phase 3**: ControlNet統合
 4. **Phase 4**: フリッカー対策・UX改善
+
+## セットアップ・起動手順
+
+### サーバー
+
+```bash
+# 依存インストール
+pip install -r server/requirements/base.txt     # Phase 1 (GPU不要)
+pip install -r server/requirements/gpu.txt      # Phase 2以降 (CUDA必須)
+
+# 設定ファイル
+cp .env.example .env
+# PIPELINE=echo     → Phase 1（AI無し）
+# PIPELINE=lcm      → Phase 2（SD1.5 + LCM）
+# PIPELINE=controlnet → Phase 3（ControlNet）
+
+# 起動
+cd server
+PIPELINE=echo uvicorn src.chrono_lens_server.main:app --host 0.0.0.0 --port 8765
+
+# または Docker (GPU環境)
+docker compose -f docker/docker-compose.yml up
+```
+
+テスト実行:
+```bash
+cd server
+pip install -r requirements/dev.txt
+pytest tests/
+```
+
+### モバイル (Flutter)
+
+```bash
+cd mobile
+
+# サーバーIPを設定 (lib/app.dart の _defaultServerUrl を編集)
+# ws://192.168.x.x:8765/stream  ← PCのローカルIPに変更
+
+fvm flutter pub get
+fvm flutter run
+```

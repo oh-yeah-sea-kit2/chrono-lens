@@ -21,11 +21,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# PIPELINE env var controls which phase runs:
+#   "echo"       → Phase 1 (default, no GPU required)
+#   "lcm"        → Phase 2 (SD1.5 + LCM, requires CUDA)
+#   "controlnet" → Phase 3 (SD1.5 + LCM LoRA + ControlNet Canny, requires CUDA)
+PIPELINE = os.getenv("PIPELINE", "echo").lower()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Server starting up (Phase 1: echo mode)")
-    # Phase 2+: load models here, then call set_process_func(ai_pipeline.process)
+    if PIPELINE == "echo":
+        logger.info("Server starting up in ECHO mode (Phase 1)")
+    elif PIPELINE == "lcm":
+        logger.info("Server starting up in LCM mode (Phase 2)")
+        from .pipeline.model_loader import load_models
+        from .pipeline.lcm_pipeline import process
+        load_models(use_controlnet=False)
+        set_process_func(process)
+    elif PIPELINE == "controlnet":
+        logger.info("Server starting up in ControlNet mode (Phase 3)")
+        from .pipeline.model_loader import load_models
+        from .pipeline.controlnet_pipeline import process
+        load_models(use_controlnet=True)
+        set_process_func(process)
+    else:
+        logger.warning("Unknown PIPELINE=%s, falling back to echo", PIPELINE)
+
     yield
     logger.info("Server shutting down")
 
@@ -42,7 +63,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0", "mode": "echo"}
+    return {"status": "ok", "version": "0.1.0", "mode": PIPELINE}
 
 
 @app.websocket("/stream")

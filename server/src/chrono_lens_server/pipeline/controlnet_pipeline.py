@@ -10,7 +10,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-FIXED_SEED = int(os.getenv("FIXED_SEED", "42"))
 CONTROLNET_STEPS = int(os.getenv("CONTROLNET_STEPS", "6"))
 CONTROLNET_STRENGTH = float(os.getenv("CONTROLNET_STRENGTH", "0.75"))
 CONTROLNET_SCALE = float(os.getenv("CONTROLNET_SCALE", "0.7"))
@@ -64,7 +63,7 @@ async def process(frame) -> bytes:
     global _prev_result_pil
     import torch
     from .edge_detector import jpeg_to_canny
-    from .model_loader import FIXED_SEED, get_controlnet_pipeline
+    from .model_loader import FIXED_SEED, get_controlnet_pipeline  # noqa: PLC0415
     from .prompt_templates import get_prompts
 
     pipe = get_controlnet_pipeline()

@@ -7,13 +7,9 @@ process(frame) replaces the echo function in handler.py.
 import io
 import logging
 import os
-import time
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
-FIXED_SEED = int(os.getenv("FIXED_SEED", "42"))
 LCM_STEPS = int(os.getenv("LCM_STEPS", "4"))
 LCM_STRENGTH = float(os.getenv("LCM_STRENGTH", "0.55"))
 OUTPUT_QUALITY = int(os.getenv("OUTPUT_QUALITY", "85"))
@@ -36,7 +32,7 @@ async def process(frame) -> bytes:
     frame: ClientFrame from protocol.py
     """
     import torch
-    from .model_loader import FIXED_SEED, get_lcm_pipeline
+    from .model_loader import FIXED_SEED, get_lcm_pipeline  # noqa: PLC0415
     from .prompt_templates import get_prompts
 
     pipe = get_lcm_pipeline()

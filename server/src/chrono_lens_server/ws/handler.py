@@ -7,6 +7,7 @@ is discarded so the latest frame is always processed next.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -69,13 +70,18 @@ async def handle_connection(websocket: WebSocket) -> None:
 
         done, pending = await asyncio.wait(
             {recv_task, proc_task},
-            return_when=asyncio.FIRST_EXCEPTION,
+            return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
             task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
         for task in done:
-            if task.exception():
-                raise task.exception()
+            exc = task.exception()
+            if exc:
+                raise exc
 
     except WebSocketDisconnect:
         logger.info("Client disconnected session=%s metrics=%s", session_id, metrics.to_dict())
@@ -95,7 +101,12 @@ async def _recv_loop(
     queue: asyncio.Queue,
     metrics: ConnectionMetrics,
 ) -> None:
-    async for raw in websocket.iter_bytes():
+    while True:
+        try:
+            raw = await websocket.receive_bytes()
+        except WebSocketDisconnect:
+            break
+
         metrics.record_received()
         try:
             frame = parse_client_frame(raw)
@@ -124,7 +135,10 @@ async def _proc_loop(
         t0 = time.monotonic()
 
         try:
-            result_jpeg = await process_fn(frame)
+            if inspect.iscoroutinefunction(process_fn):
+                result_jpeg = await process_fn(frame)
+            else:
+                result_jpeg = process_fn(frame)
             flags = 0
         except Exception as e:
             logger.exception("Process error frame_id=%d: %s", frame.frame_id, e)
