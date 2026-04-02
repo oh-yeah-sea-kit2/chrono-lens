@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data/models:/app/models
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - LOG_LEVEL=info
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
