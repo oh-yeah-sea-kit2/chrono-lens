@@ -14,9 +14,10 @@ import 'widgets/era_selector.dart';
 import 'widgets/latency_overlay.dart';
 
 class CameraPage extends StatefulWidget {
-  const CameraPage({super.key, required this.serverUrl});
+  const CameraPage({super.key, required this.serverUrl, this.onResetServer});
 
   final String serverUrl;
+  final VoidCallback? onResetServer;
 
   @override
   State<CameraPage> createState() => _CameraPageState();
@@ -172,6 +173,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
                 onSelected: _onEraSelected,
               ),
               onDebugToggle: () => setState(() => _showDebug = !_showDebug),
+              onResetServer: widget.onResetServer,
             ),
           ),
         ],
@@ -223,12 +225,14 @@ class _BottomControls extends StatelessWidget {
     required this.showDebug,
     required this.onEraTap,
     required this.onDebugToggle,
+    this.onResetServer,
   });
 
   final Era selectedEra;
   final bool showDebug;
   final VoidCallback onEraTap;
   final VoidCallback onDebugToggle;
+  final VoidCallback? onResetServer;
 
   @override
   Widget build(BuildContext context) {
@@ -281,8 +285,12 @@ class _BottomControls extends StatelessWidget {
             ),
           ),
 
-          // Placeholder for future shutter button
-          const SizedBox(width: 48),
+          // Server settings reset
+          IconButton(
+            icon: const Icon(Icons.settings_ethernet, color: Colors.white70),
+            onPressed: onResetServer,
+            tooltip: 'サーバー設定',
+          ),
         ],
       ),
     );

@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'features/camera/camera_page.dart';
-
-// TODO: Move to environment config or settings screen
-const _defaultServerUrl = 'ws://192.168.1.100:8765/stream';
+import 'features/setup/setup_page.dart';
+import 'services/server_config.dart';
 
 class ChronoLensApp extends StatelessWidget {
   const ChronoLensApp({super.key});
@@ -20,7 +19,62 @@ class ChronoLensApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: Colors.black,
       ),
-      home: const CameraPage(serverUrl: _defaultServerUrl),
+      home: const _RootPage(),
+    );
+  }
+}
+
+/// Checks saved config and routes to SetupPage or CameraPage.
+class _RootPage extends StatefulWidget {
+  const _RootPage();
+
+  @override
+  State<_RootPage> createState() => _RootPageState();
+}
+
+class _RootPageState extends State<_RootPage> {
+  ServerConfig? _config;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final config = await ServerConfig.load();
+    if (mounted) {
+      setState(() {
+        _config = config;
+        _loading = false;
+      });
+    }
+  }
+
+  void _onConfigured() => _load();
+
+  void _onResetConfig() async {
+    await ServerConfig.clear();
+    if (mounted) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_config == null) {
+      return SetupPage(onConfigured: _onConfigured);
+    }
+
+    return CameraPage(
+      serverUrl: _config!.wsUrl,
+      onResetServer: _onResetConfig,
     );
   }
 }
