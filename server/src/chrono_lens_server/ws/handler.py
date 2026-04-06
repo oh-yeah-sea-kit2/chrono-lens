@@ -41,6 +41,52 @@ async def _echo_process(frame: ClientFrame) -> bytes:
     return frame.jpeg
 
 
+async def _handle_capture(websocket: WebSocket, cmd: dict) -> None:
+    """Handle a capture request: receive JPEG, run HQ pipeline, return result."""
+    import base64
+
+    era_id = cmd.get("era_id", 1)
+    jpeg_length = cmd.get("jpeg_length", 0)
+    logger.info("Capture request: era_id=%s expected_jpeg=%d", era_id, jpeg_length)
+
+    try:
+        # Receive JPEG binary (next message)
+        jpeg_data = await asyncio.wait_for(websocket.receive_bytes(), timeout=10.0)
+        logger.info("Capture: received %dB jpeg, first=%s", len(jpeg_data), jpeg_data[:4].hex())
+
+        # Run HQ pipeline or echo
+        from ..pipeline.hq_pipeline import capture as hq_capture
+        loop = asyncio.get_running_loop()
+        try:
+            result_jpeg, proc_ms = await loop.run_in_executor(
+                None, hq_capture, jpeg_data, era_id,
+            )
+        except Exception:
+            # Fallback to echo if pipeline not loaded
+            logger.warning("HQ pipeline failed, falling back to echo")
+            result_jpeg = jpeg_data
+            proc_ms = 0
+
+        result_json = {
+            "type": "capture_result",
+            "image": base64.b64encode(result_jpeg).decode(),
+            "era_id": era_id,
+            "processing_time_ms": proc_ms,
+        }
+        await websocket.send_text(json.dumps(result_json))
+        logger.info("Capture: sent result (%d chars, %dms)", len(json.dumps(result_json)), proc_ms)
+
+    except Exception as e:
+        logger.exception("Capture error: %s", e)
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "capture_error",
+                "error": str(e),
+            }))
+        except Exception:
+            pass
+
+
 async def handle_connection(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = str(uuid.uuid4())
@@ -103,29 +149,41 @@ async def _recv_loop(
 ) -> None:
     while True:
         try:
-            raw = await websocket.receive_bytes()
+            msg = await websocket.receive()
         except WebSocketDisconnect:
             break
 
-        metrics.record_received()
-        try:
-            frame = parse_client_frame(raw)
-        except ValueError as e:
-            logger.warning("Parse error: %s (raw_len=%d)", e, len(raw))
+        if "text" in msg:
+            # JSON command (e.g. capture request)
+            try:
+                cmd = json.loads(msg["text"])
+                if cmd.get("type") == "capture":
+                    await _handle_capture(websocket, cmd)
+            except Exception as e:
+                logger.exception("Text message error: %s", e)
             continue
 
-        if queue.full():
+        if "bytes" in msg:
+            raw = msg["bytes"]
+            metrics.record_received()
             try:
-                queue.get_nowait()
-                metrics.record_dropped()
-                logger.debug("Dropped stale frame_id=%d", frame.frame_id)
-            except asyncio.QueueEmpty:
-                pass
-        queue.put_nowait(frame)
-        logger.debug(
-            "Recv frame_id=%d era=%d size=%dx%d jpeg=%dB",
-            frame.frame_id, frame.era_id, frame.width, frame.height, len(frame.jpeg),
-        )
+                frame = parse_client_frame(raw)
+            except ValueError as e:
+                logger.warning("Parse error: %s (raw_len=%d)", e, len(raw))
+                continue
+
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                    metrics.record_dropped()
+                    logger.debug("Dropped stale frame_id=%d", frame.frame_id)
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(frame)
+            logger.debug(
+                "Recv frame_id=%d era=%d size=%dx%d jpeg=%dB",
+                frame.frame_id, frame.era_id, frame.width, frame.height, len(frame.jpeg),
+            )
 
 
 async def _proc_loop(

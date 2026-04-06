@@ -44,7 +44,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _captureService = CaptureService(captureUrl: '${widget.httpUrl}/capture');
+    _captureService = CaptureService(serverWsUrl: widget.serverUrl);
     _init();
   }
 
@@ -53,6 +53,9 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     await _initCamera();
     await _loadStyleModel();
     await _setEraStyle(_selectedEra);
+    // Establish persistent WebSocket connection (same as old streaming arch)
+    final connected = await _captureService.connect();
+    debugPrint('[CameraPage] Server connection: $connected');
   }
 
   Future<void> _loadStyleModel() async {
@@ -200,9 +203,9 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     if (ctrl == null || !ctrl.value.isInitialized) return;
 
     if (state == AppLifecycleState.inactive) {
-      ctrl.stopImageStream();
+      try { ctrl.stopImageStream(); } catch (_) {}
     } else if (state == AppLifecycleState.resumed) {
-      ctrl.startImageStream(_onCameraFrame);
+      try { ctrl.startImageStream(_onCameraFrame); } catch (_) {}
     }
   }
 
@@ -210,6 +213,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cameraController?.dispose();
+    _captureService.dispose();
     super.dispose();
   }
 
