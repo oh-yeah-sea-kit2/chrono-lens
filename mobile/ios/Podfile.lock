@@ -1,4 +1,7 @@
 PODS:
+  - bonsoir_darwin (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - camera_avfoundation (0.0.1):
     - Flutter
   - Flutter (1.0.0)
@@ -9,12 +12,15 @@ PODS:
     - FlutterMacOS
 
 DEPENDENCIES:
+  - bonsoir_darwin (from `.symlinks/plugins/bonsoir_darwin/darwin`)
   - camera_avfoundation (from `.symlinks/plugins/camera_avfoundation/ios`)
   - Flutter (from `Flutter`)
   - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
 
 EXTERNAL SOURCES:
+  bonsoir_darwin:
+    :path: ".symlinks/plugins/bonsoir_darwin/darwin"
   camera_avfoundation:
     :path: ".symlinks/plugins/camera_avfoundation/ios"
   Flutter:
@@ -25,6 +31,7 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
 
 SPEC CHECKSUMS:
+  bonsoir_darwin: 29c7ccf356646118844721f36e1de4b61f6cbd0e
   camera_avfoundation: 5675ca25298b6f81fa0a325188e7df62cc217741
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d

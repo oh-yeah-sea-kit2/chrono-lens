@@ -51,6 +51,10 @@
 	<string>カメラを使ってリアルタイムで過去の風景に変換します</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>同じWi-Fi上のGPUサーバーにリアルタイム映像を送信するために使用します</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_chrono-lens._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

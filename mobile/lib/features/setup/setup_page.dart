@@ -33,32 +33,35 @@ class _SetupPageState extends State<SetupPage> {
   }
 
   Future<void> _startDiscovery() async {
-    _discovery = BonsoirDiscovery(type: '_chrono-lens._tcp');
-    await _discovery!.initialize();
-    _discovery!.eventStream?.listen((event) async {
-      switch (event) {
-        case BonsoirDiscoveryServiceFoundEvent():
-          // Resolve to get host/port
-          await _discovery!.serviceResolver.resolveService(event.service);
-        case BonsoirDiscoveryServiceResolvedEvent():
-          final service = event.service;
-          final host = service.host;
-          final port = service.port;
-          if (host != null && mounted) {
-            setState(() {
-              _servers.removeWhere((s) => s.host == host && s.port == port);
-              _servers.add(_DiscoveredServer(
-                host: host,
-                port: port,
-                pipeline: service.attributes['pipeline'] ?? 'echo',
-              ));
-            });
-          }
-        default:
-          break;
-      }
-    });
-    await _discovery!.start();
+    try {
+      _discovery = BonsoirDiscovery(type: '_chrono-lens._tcp');
+      await _discovery!.initialize();
+      _discovery!.eventStream?.listen((event) async {
+        switch (event) {
+          case BonsoirDiscoveryServiceFoundEvent():
+            await _discovery!.serviceResolver.resolveService(event.service);
+          case BonsoirDiscoveryServiceResolvedEvent():
+            final service = event.service;
+            final host = service.host;
+            final port = service.port;
+            if (host != null && mounted) {
+              setState(() {
+                _servers.removeWhere((s) => s.host == host && s.port == port);
+                _servers.add(_DiscoveredServer(
+                  host: host,
+                  port: port,
+                  pipeline: service.attributes['pipeline'] ?? 'echo',
+                ));
+              });
+            }
+          default:
+            break;
+        }
+      });
+      await _discovery!.start();
+    } catch (e) {
+      debugPrint('[SetupPage] mDNS discovery failed: $e');
+    }
 
     // Stop spinning after 5 seconds regardless
     await Future.delayed(const Duration(seconds: 5));
