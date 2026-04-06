@@ -111,17 +111,21 @@ async def _recv_loop(
         try:
             frame = parse_client_frame(raw)
         except ValueError as e:
-            logger.warning("Parse error: %s", e)
+            logger.warning("Parse error: %s (raw_len=%d)", e, len(raw))
             continue
 
         if queue.full():
-            # Drop the oldest frame to keep queue fresh (LIFO behavior)
             try:
                 queue.get_nowait()
                 metrics.record_dropped()
+                logger.debug("Dropped stale frame_id=%d", frame.frame_id)
             except asyncio.QueueEmpty:
                 pass
         queue.put_nowait(frame)
+        logger.debug(
+            "Recv frame_id=%d era=%d size=%dx%d jpeg=%dB",
+            frame.frame_id, frame.era_id, frame.width, frame.height, len(frame.jpeg),
+        )
 
 
 async def _proc_loop(
@@ -160,7 +164,19 @@ async def _proc_loop(
         )
         raw = build_server_result(result)
 
+        logger.debug(
+            "Send frame_id=%d proc_us=%d result_jpeg=%dB",
+            frame.frame_id, proc_us, len(result_jpeg),
+        )
+
         try:
             await websocket.send_bytes(raw)
         except Exception:
             break
+
+        # Periodic summary every 10 frames
+        if metrics.frames_processed % 10 == 0:
+            logger.info(
+                "Stats: %s",
+                metrics.to_dict(),
+            )

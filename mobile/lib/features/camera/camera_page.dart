@@ -83,8 +83,19 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
 
   void _listenResults() {
     _resultSub = _ws.resultStream.listen((result) {
+      debugPrint(
+        '[Camera] Result frame_id=${result.frameId} '
+        'rtt=${result.rttMs.toStringAsFixed(0)}ms '
+        'proc=${result.procMs.toStringAsFixed(0)}ms '
+        'jpeg=${result.jpeg.length}B '
+        'dropped=${result.isDropped}',
+      );
+
       // Discard stale results (more than 3 frames behind)
-      if (result.frameId < _latestFrameId - 3) return;
+      if (result.frameId < _latestFrameId - 3) {
+        debugPrint('[Camera] Discarding stale frame_id=${result.frameId} (latest=$_latestFrameId)');
+        return;
+      }
       _latestFrameId = result.frameId;
 
       _processor.onResultReceived(result.rttMs);
@@ -103,6 +114,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     _processor.era = _selectedEra;
     final bytes = await _processor.process(image);
     if (bytes != null) {
+      debugPrint('[Camera] Sending frame ${_processor.stats}');
       _ws.sendFrame(bytes);
     }
   }
