@@ -2,8 +2,10 @@
 Phase 2: SD1.5 + LCM img2img pipeline.
 
 process(frame) replaces the echo function in handler.py.
+Inference runs in a thread pool to avoid blocking the asyncio event loop.
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -26,11 +28,8 @@ def _pil_to_jpeg(img, quality: int = OUTPUT_QUALITY) -> bytes:
     return buf.getvalue()
 
 
-async def process(frame) -> bytes:
-    """
-    Phase 2 process function. Drop-in replacement for echo.
-    frame: ClientFrame from protocol.py
-    """
+def _infer(frame) -> bytes:
+    """Synchronous inference — called from a thread pool."""
     import torch
     from .model_loader import FIXED_SEED, get_device, get_lcm_pipeline
     from .prompt_templates import get_prompts
@@ -57,3 +56,9 @@ async def process(frame) -> bytes:
     )
 
     return _pil_to_jpeg(result.images[0])
+
+
+async def process(frame) -> bytes:
+    """Async wrapper — runs inference in a thread to keep the event loop free."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _infer, frame)

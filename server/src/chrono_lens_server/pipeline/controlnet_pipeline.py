@@ -1,7 +1,10 @@
 """
 Phase 3: SD1.5 + LCM LoRA + ControlNet Canny img2img pipeline.
+
+Inference runs in a thread pool to avoid blocking the asyncio event loop.
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -27,11 +30,8 @@ def _pil_to_jpeg(img, quality: int = OUTPUT_QUALITY) -> bytes:
     return buf.getvalue()
 
 
-def _adain_color_transfer(source_pil, target_pil) -> "PIL.Image.Image":
-    """
-    AdaIN color transfer: align source's Lab color distribution to target's.
-    Reduces inter-frame color flicker.
-    """
+def _adain_color_transfer(source_pil, target_pil):
+    """AdaIN color transfer in Lab space to reduce inter-frame flicker."""
     import cv2
     from PIL import Image
 
@@ -56,10 +56,8 @@ def _adain_color_transfer(source_pil, target_pil) -> "PIL.Image.Image":
 _prev_result_pil = None
 
 
-async def process(frame) -> bytes:
-    """
-    Phase 3 process function. Drop-in replacement for lcm_pipeline.process.
-    """
+def _infer(frame) -> bytes:
+    """Synchronous inference — called from a thread pool."""
     global _prev_result_pil
     import torch
     from .edge_detector import jpeg_to_canny
@@ -92,9 +90,14 @@ async def process(frame) -> bytes:
 
     result_pil = result.images[0]
 
-    # AdaIN color transfer to reduce flicker
     if _prev_result_pil is not None:
         result_pil = _adain_color_transfer(result_pil, _prev_result_pil)
     _prev_result_pil = result_pil
 
     return _pil_to_jpeg(result_pil)
+
+
+async def process(frame) -> bytes:
+    """Async wrapper — runs inference in a thread to keep the event loop free."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _infer, frame)

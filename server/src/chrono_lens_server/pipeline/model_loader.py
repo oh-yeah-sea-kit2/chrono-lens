@@ -60,7 +60,10 @@ def load_lcm_pipeline():
     pipe = DiffusionPipeline.from_pretrained(
         MODEL_ID,
         torch_dtype=dtype,
+        safety_checker=None,
+        requires_safety_checker=False,
     ).to(device)
+    logger.info("Safety checker disabled (camera feed triggers false positives)")
 
     if device == "cuda":
         try:

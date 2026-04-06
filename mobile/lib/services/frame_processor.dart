@@ -59,16 +59,29 @@ class FrameProcessor {
 
   Era era = Era.taisho;
 
+  /// Adaptive timeout: starts at _maxInFlightMs, grows based on actual RTT.
+  int _adaptiveTimeoutMs = 0;
+
   /// Call when a server result arrives (releases backpressure).
   void onResultReceived(double rttMs) {
     _inFlight = false;
     _recentRttsMs.add(rttMs);
     if (_recentRttsMs.length > 10) _recentRttsMs.removeAt(0);
+
+    // Adapt timeout to actual server speed (use 80th percentile RTT)
+    if (_recentRttsMs.length >= 3) {
+      final sorted = List<double>.from(_recentRttsMs)..sort();
+      final p80 = sorted[(sorted.length * 0.8).floor()];
+      _adaptiveTimeoutMs = (p80 * 1.2).round(); // 20% headroom
+    }
   }
 
   /// Returns encoded binary frame ready to send, or null if throttled.
   Future<Uint8List?> process(CameraImage image) async {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final effectiveTimeout = _adaptiveTimeoutMs > 0
+        ? _adaptiveTimeoutMs
+        : _maxInFlightMs;
 
     // Throttle by target interval
     if (nowMs - _lastSentMs < _targetIntervalMs) {
@@ -76,8 +89,8 @@ class FrameProcessor {
       return null;
     }
 
-    // Backpressure: wait for previous frame unless timeout exceeded
-    if (_inFlight && nowMs - _inFlightSentMs < _maxInFlightMs) {
+    // Backpressure: don't send if server hasn't responded yet
+    if (_inFlight && nowMs - _inFlightSentMs < effectiveTimeout) {
       _droppedCount++;
       return null;
     }

@@ -176,11 +176,19 @@ gpu = [
     { name = "transformers" },
     { name = "xformers" },
 ]
+mps = [
+    { name = "accelerate" },
+    { name = "diffusers" },
+    { name = "torch" },
+    { name = "transformers" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'gpu'", specifier = ">=0.29" },
+    { name = "accelerate", marker = "extra == 'mps'", specifier = ">=0.29" },
     { name = "diffusers", marker = "extra == 'gpu'", specifier = ">=0.27" },
+    { name = "diffusers", marker = "extra == 'mps'", specifier = ">=0.27" },
     { name = "fastapi", specifier = ">=0.111" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "numpy", specifier = ">=1.26" },
@@ -189,13 +197,15 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "torch", marker = "extra == 'mps'", specifier = ">=2.2" },
     { name = "transformers", marker = "extra == 'gpu'", specifier = ">=4.40" },
+    { name = "transformers", marker = "extra == 'mps'", specifier = ">=4.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
     { name = "websockets", specifier = ">=12" },
     { name = "xformers", marker = "extra == 'gpu'", specifier = ">=0.0.25" },
     { name = "zeroconf", specifier = ">=0.131" },
 ]
-provides-extras = ["gpu", "dev"]
+provides-extras = ["mps", "gpu", "dev"]
 
 [[package]]
 name = "click"
