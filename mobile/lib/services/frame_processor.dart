@@ -12,6 +12,30 @@ const _version = 0x01;
 const _msgTypeFrame = 0x01;
 const _targetSize = 512;
 
+/// Serializable snapshot of camera plane data.
+/// CameraImage itself holds native memory that gets invalidated across Isolates.
+class _PlaneData {
+  _PlaneData({required this.bytes, required this.bytesPerRow, required this.bytesPerPixel});
+  final Uint8List bytes;
+  final int bytesPerRow;
+  final int bytesPerPixel;
+}
+
+class _FrameSnapshot {
+  _FrameSnapshot({
+    required this.width,
+    required this.height,
+    required this.planes,
+    required this.isYuv420,
+    required this.isBgra,
+  });
+  final int width;
+  final int height;
+  final List<_PlaneData> planes;
+  final bool isYuv420;
+  final bool isBgra;
+}
+
 /// Controls camera frame → WebSocket binary conversion and throttling.
 class FrameProcessor {
   FrameProcessor({
@@ -40,9 +64,6 @@ class FrameProcessor {
     _inFlight = false;
     _recentRttsMs.add(rttMs);
     if (_recentRttsMs.length > 10) _recentRttsMs.removeAt(0);
-
-    // Adaptive FPS: slow down if server is struggling
-    // (handled by backpressure naturally; no extra action needed here)
   }
 
   /// Returns encoded binary frame ready to send, or null if throttled.
@@ -61,7 +82,20 @@ class FrameProcessor {
       return null;
     }
 
-    final jpeg = await _encodeFrame(image);
+    // Copy native camera data to Dart heap BEFORE sending to Isolate.
+    final snapshot = _FrameSnapshot(
+      width: image.width,
+      height: image.height,
+      planes: image.planes.map((p) => _PlaneData(
+        bytes: Uint8List.fromList(p.bytes),
+        bytesPerRow: p.bytesPerRow,
+        bytesPerPixel: p.bytesPerPixel ?? 1,
+      )).toList(),
+      isYuv420: image.format.group == ImageFormatGroup.yuv420,
+      isBgra: image.format.group == ImageFormatGroup.bgra8888,
+    );
+
+    final jpeg = await _encodeFrame(snapshot);
     if (jpeg == null) return null;
 
     _frameIdCounter++;
@@ -83,9 +117,9 @@ class FrameProcessor {
     return raw;
   }
 
-  Future<Uint8List?> _encodeFrame(CameraImage image) async {
+  Future<Uint8List?> _encodeFrame(_FrameSnapshot snapshot) async {
     try {
-      return await compute(_convertAndEncodeIsolate, image);
+      return await compute(_convertAndEncode, snapshot);
     } catch (e) {
       debugPrint('[FrameProcessor] encode error: $e');
       return null;
@@ -98,7 +132,6 @@ class FrameProcessor {
     required int eraId,
     required Uint8List jpeg,
   }) {
-    // Header: 32 bytes (little-endian)
     final header = ByteData(32);
     header.setUint8(0, _magic[0]);
     header.setUint8(1, _magic[1]);
@@ -109,8 +142,8 @@ class FrameProcessor {
     header.setUint16(20, _targetSize, Endian.little);
     header.setUint16(22, _targetSize, Endian.little);
     header.setUint8(24, eraId);
-    header.setUint8(25, 75); // JPEG quality hint
-    header.setUint16(26, 0, Endian.little); // reserved
+    header.setUint8(25, 75);
+    header.setUint16(26, 0, Endian.little);
     header.setUint32(28, jpeg.length, Endian.little);
 
     final result = Uint8List(32 + jpeg.length);
@@ -129,17 +162,17 @@ class FrameProcessor {
       };
 }
 
-/// Run in an Isolate to avoid blocking the UI thread.
-Uint8List? _convertAndEncodeIsolate(CameraImage cameraImage) {
+/// Runs in an Isolate — only uses plain Dart data, no native references.
+Uint8List? _convertAndEncode(_FrameSnapshot snap) {
   img.Image? frame;
 
-  if (cameraImage.format.group == ImageFormatGroup.yuv420) {
-    frame = _yuv420ToImage(cameraImage);
-  } else if (cameraImage.format.group == ImageFormatGroup.bgra8888) {
+  if (snap.isYuv420) {
+    frame = _yuv420ToImage(snap);
+  } else if (snap.isBgra) {
     frame = img.Image.fromBytes(
-      width: cameraImage.width,
-      height: cameraImage.height,
-      bytes: cameraImage.planes[0].bytes.buffer,
+      width: snap.width,
+      height: snap.height,
+      bytes: snap.planes[0].bytes.buffer,
       order: img.ChannelOrder.bgra,
     );
   } else {
@@ -156,21 +189,19 @@ Uint8List? _convertAndEncodeIsolate(CameraImage cameraImage) {
   return Uint8List.fromList(img.encodeJpg(resized, quality: 75));
 }
 
-img.Image _yuv420ToImage(CameraImage cameraImage) {
-  final width = cameraImage.width;
-  final height = cameraImage.height;
-  final yPlane = cameraImage.planes[0].bytes;
-  final yRowStride = cameraImage.planes[0].bytesPerRow;
-  final uvPlane = cameraImage.planes[1].bytes;
-  final uvRowStride = cameraImage.planes[1].bytesPerRow;
-  final uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 2;
+img.Image _yuv420ToImage(_FrameSnapshot snap) {
+  final width = snap.width;
+  final height = snap.height;
+  final yPlane = snap.planes[0].bytes;
+  final yRowStride = snap.planes[0].bytesPerRow;
+  final uvPlane = snap.planes[1].bytes;
+  final uvRowStride = snap.planes[1].bytesPerRow;
 
-  // iOS NV12: planes[1] has interleaved CbCr (2 planes total)
-  // Android YUV_420_888: planes[1]=U, planes[2]=V (3 planes)
-  final isNV12 = cameraImage.planes.length == 2;
-
-  final Uint8List? vPlane =
-      isNV12 ? null : cameraImage.planes[2].bytes;
+  // iOS NV12: 2 planes (Y + interleaved CbCr)
+  // Android YUV_420_888: 3 planes (Y + U + V)
+  final isNV12 = snap.planes.length == 2;
+  final Uint8List? vPlane = isNV12 ? null : snap.planes[2].bytes;
+  final uvPixelStride = snap.planes[1].bytesPerPixel;
 
   final image = img.Image(width: width, height: height);
 
@@ -182,12 +213,10 @@ img.Image _yuv420ToImage(CameraImage cameraImage) {
       int vValue;
 
       if (isNV12) {
-        // NV12: uvPlane has [Cb, Cr, Cb, Cr, ...] interleaved
         final uvIndex = (y ~/ 2) * uvRowStride + (x ~/ 2) * 2;
         uValue = uvPlane[uvIndex];
         vValue = uvPlane[uvIndex + 1];
       } else {
-        // Android YUV_420_888: separate U and V planes
         final uvIndex = uvPixelStride * (x ~/ 2) + uvRowStride * (y ~/ 2);
         uValue = uvPlane[uvIndex];
         vValue = vPlane![uvIndex];

@@ -36,36 +36,38 @@ class EraSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(16),
-            child: Text(
-              '時代を選択',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                '時代を選択',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
-          ...Era.values.map((era) => ListTile(
-                leading: era == selectedEra
-                    ? const Icon(Icons.check_circle, color: Colors.amber)
-                    : const Icon(Icons.radio_button_unchecked, color: Colors.white38),
-                title: Text(
-                  era.label,
-                  style: const TextStyle(color: Colors.white),
-                ),
-                subtitle: Text(
-                  era.subtitle,
-                  style: const TextStyle(color: Colors.white54),
-                ),
-                onTap: () => onEraSelected(era),
-              )),
-          const SizedBox(height: 8),
-        ],
+            ...Era.values.map((era) => ListTile(
+                  leading: era == selectedEra
+                      ? const Icon(Icons.check_circle, color: Colors.amber)
+                      : const Icon(Icons.radio_button_unchecked, color: Colors.white38),
+                  title: Text(
+                    era.label,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  subtitle: Text(
+                    era.subtitle,
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                  onTap: () => onEraSelected(era),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
