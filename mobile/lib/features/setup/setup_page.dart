@@ -42,13 +42,19 @@ class _SetupPageState extends State<SetupPage> {
             await _discovery!.serviceResolver.resolveService(event.service);
           case BonsoirDiscoveryServiceResolvedEvent():
             final service = event.service;
-            final host = service.host;
+            var host = service.host;
             final port = service.port;
-            if (host != null && mounted) {
+            debugPrint('[SetupPage] Resolved: host=$host port=$port attrs=${service.attributes}');
+            // Strip trailing dot from mDNS hostname if present
+            if (host != null && host.endsWith('.')) {
+              host = host.substring(0, host.length - 1);
+            }
+            if (host != null && host.isNotEmpty && mounted) {
+              final resolvedHost = host; // promote to non-null
               setState(() {
-                _servers.removeWhere((s) => s.host == host && s.port == port);
+                _servers.removeWhere((s) => s.host == resolvedHost && s.port == port);
                 _servers.add(_DiscoveredServer(
-                  host: host,
+                  host: resolvedHost,
                   port: port,
                   pipeline: service.attributes['pipeline'] ?? 'echo',
                 ));

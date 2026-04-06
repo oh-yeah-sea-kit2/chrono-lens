@@ -13,9 +13,10 @@ import '../result/result_page.dart';
 import 'widgets/era_selector.dart';
 
 class CameraPage extends StatefulWidget {
-  const CameraPage({super.key, required this.serverUrl, this.onResetServer});
+  const CameraPage({super.key, required this.serverUrl, required this.httpUrl, this.onResetServer});
 
   final String serverUrl;
+  final String httpUrl;
   final VoidCallback? onResetServer;
 
   @override
@@ -42,11 +43,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Extract base HTTP URL from WebSocket URL
-    final httpUrl = widget.serverUrl
-        .replaceFirst('ws://', 'http://')
-        .replaceFirst('/stream', '');
-    _captureService = CaptureService(baseUrl: httpUrl);
+    _captureService = CaptureService(baseUrl: widget.httpUrl);
     _init();
   }
 

@@ -41,11 +41,13 @@ class _ResultPageState extends State<ResultPage> {
   }
 
   Future<void> _requestCapture() async {
+    debugPrint('[ResultPage] Requesting capture era=${widget.era.id} jpeg=${widget.originalJpeg.length}B');
     try {
       final result = await widget.captureService.capture(
         widget.originalJpeg,
         widget.era,
       );
+      debugPrint('[ResultPage] Capture success: ${result.image.length}B in ${result.processingTimeMs}ms');
       if (mounted) {
         setState(() {
           _result = result.image;
@@ -54,6 +56,7 @@ class _ResultPageState extends State<ResultPage> {
         });
       }
     } catch (e) {
+      debugPrint('[ResultPage] Capture error: $e');
       if (mounted) {
         setState(() {
           _error = e.toString();

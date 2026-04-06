@@ -74,6 +74,7 @@ class _RootPageState extends State<_RootPage> {
 
     return CameraPage(
       serverUrl: _config!.wsUrl,
+      httpUrl: _config!.httpUrl,
       onResetServer: _onResetConfig,
     );
   }
