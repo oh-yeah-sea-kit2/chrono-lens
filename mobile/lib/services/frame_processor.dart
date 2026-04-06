@@ -13,7 +13,6 @@ const _msgTypeFrame = 0x01;
 const _targetSize = 512;
 
 /// Serializable snapshot of camera plane data.
-/// CameraImage itself holds native memory that gets invalidated across Isolates.
 class _PlaneData {
   _PlaneData({required this.bytes, required this.bytesPerRow, required this.bytesPerPixel});
   final Uint8List bytes;
@@ -36,66 +35,55 @@ class _FrameSnapshot {
   final bool isBgra;
 }
 
-/// Controls camera frame → WebSocket binary conversion and throttling.
+/// Ping-pong frame processor.
+///
+/// Flow:
+/// 1. Server ready (or first frame) → capture & send ONE frame
+/// 2. Wait for server result
+/// 3. On result received → capture & send next frame
+/// 4. Repeat
+///
+/// No frames are sent while the server is processing. Zero wasted frames.
 class FrameProcessor {
-  FrameProcessor({
-    int targetFps = 5,
-    int maxInFlightMs = 300,
-  })  : _targetIntervalMs = (1000 / targetFps).round(),
-        _maxInFlightMs = maxInFlightMs;
-
-  final int _targetIntervalMs;
-  final int _maxInFlightMs;
+  FrameProcessor();
 
   int _frameIdCounter = 0;
-  int _lastSentMs = 0;
+
+  /// true = server is processing, don't send
+  /// false = server is idle, send next frame
   bool _inFlight = false;
-  int _inFlightSentMs = 0;
+
+  /// Set to true once the first frame has been sent.
+  bool _started = false;
 
   // Stats
   int _sentCount = 0;
-  int _droppedCount = 0;
+  int _skippedCount = 0;
   final List<double> _recentRttsMs = [];
 
   Era era = Era.taisho;
 
-  /// Adaptive timeout: starts at _maxInFlightMs, grows based on actual RTT.
-  int _adaptiveTimeoutMs = 0;
+  /// Whether we should capture and send the next frame.
+  bool get shouldSend => !_inFlight;
 
-  /// Call when a server result arrives (releases backpressure).
+  /// Call when a server result arrives → unlocks sending the next frame.
   void onResultReceived(double rttMs) {
     _inFlight = false;
     _recentRttsMs.add(rttMs);
-    if (_recentRttsMs.length > 10) _recentRttsMs.removeAt(0);
-
-    // Adapt timeout to actual server speed (use 80th percentile RTT)
-    if (_recentRttsMs.length >= 3) {
-      final sorted = List<double>.from(_recentRttsMs)..sort();
-      final p80 = sorted[(sorted.length * 0.8).floor()];
-      _adaptiveTimeoutMs = (p80 * 1.2).round(); // 20% headroom
-    }
+    if (_recentRttsMs.length > 20) _recentRttsMs.removeAt(0);
   }
 
-  /// Returns encoded binary frame ready to send, or null if throttled.
+  /// Process a camera frame. Returns binary data to send, or null if skipped.
+  ///
+  /// Only returns non-null when the server is ready for the next frame.
   Future<Uint8List?> process(CameraImage image) async {
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final effectiveTimeout = _adaptiveTimeoutMs > 0
-        ? _adaptiveTimeoutMs
-        : _maxInFlightMs;
-
-    // Throttle by target interval
-    if (nowMs - _lastSentMs < _targetIntervalMs) {
-      _droppedCount++;
+    // Allow the very first frame through unconditionally
+    if (_started && _inFlight) {
+      _skippedCount++;
       return null;
     }
 
-    // Backpressure: don't send if server hasn't responded yet
-    if (_inFlight && nowMs - _inFlightSentMs < effectiveTimeout) {
-      _droppedCount++;
-      return null;
-    }
-
-    // Copy native camera data to Dart heap BEFORE sending to Isolate.
+    // Copy native camera data to Dart heap before Isolate
     final snapshot = _FrameSnapshot(
       width: image.width,
       height: image.height,
@@ -122,9 +110,8 @@ class FrameProcessor {
       jpeg: jpeg,
     );
 
-    _lastSentMs = nowMs;
     _inFlight = true;
-    _inFlightSentMs = nowMs;
+    _started = true;
     _sentCount++;
 
     return raw;
@@ -165,9 +152,10 @@ class FrameProcessor {
     return result;
   }
 
-  Map<String, int> get stats => {
+  Map<String, dynamic> get stats => {
         'sent': _sentCount,
-        'dropped': _droppedCount,
+        'skipped': _skippedCount,
+        'inFlight': _inFlight,
         'avgRttMs': _recentRttsMs.isEmpty
             ? 0
             : (_recentRttsMs.reduce((a, b) => a + b) / _recentRttsMs.length)
@@ -175,7 +163,7 @@ class FrameProcessor {
       };
 }
 
-/// Runs in an Isolate — only uses plain Dart data, no native references.
+/// Runs in an Isolate.
 Uint8List? _convertAndEncode(_FrameSnapshot snap) {
   img.Image? frame;
 
@@ -192,7 +180,6 @@ Uint8List? _convertAndEncode(_FrameSnapshot snap) {
     return null;
   }
 
-  // Center-crop to square then resize to 512x512
   final size = frame.width < frame.height ? frame.width : frame.height;
   final x = (frame.width - size) ~/ 2;
   final y = (frame.height - size) ~/ 2;
@@ -210,8 +197,6 @@ img.Image _yuv420ToImage(_FrameSnapshot snap) {
   final uvPlane = snap.planes[1].bytes;
   final uvRowStride = snap.planes[1].bytesPerRow;
 
-  // iOS NV12: 2 planes (Y + interleaved CbCr)
-  // Android YUV_420_888: 3 planes (Y + U + V)
   final isNV12 = snap.planes.length == 2;
   final Uint8List? vPlane = isNV12 ? null : snap.planes[2].bytes;
   final uvPixelStride = snap.planes[1].bytesPerPixel;

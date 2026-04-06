@@ -43,7 +43,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _ws = WebSocketService(serverUrl: widget.serverUrl);
-    _processor = FrameProcessor(targetFps: 5);
+    _processor = FrameProcessor();
     _init();
   }
 

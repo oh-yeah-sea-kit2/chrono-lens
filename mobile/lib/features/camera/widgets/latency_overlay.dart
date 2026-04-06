@@ -11,7 +11,7 @@ class LatencyOverlay extends StatelessWidget {
 
   final double rttMs;
   final double procMs;
-  final Map<String, int> stats;
+  final Map<String, dynamic> stats;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +37,8 @@ class LatencyOverlay extends StatelessWidget {
               Text('RTT  ${rttMs.toStringAsFixed(0).padLeft(5)} ms'),
               Text('Proc ${procMs.toStringAsFixed(0).padLeft(5)} ms'),
               Text('Sent ${stats['sent'].toString().padLeft(5)}'),
-              Text('Drop ${stats['dropped'].toString().padLeft(5)}'),
+              Text('Skip ${stats['skipped'].toString().padLeft(5)}'),
+              Text('Wait ${stats['inFlight'] == true ? '  YES' : '   NO'}'),
             ],
           ),
         ),
