@@ -17,7 +17,7 @@ build/
 
 # Models (large files - download separately)
 server/models/
-mobile/ios/Runner/Models/
+mobile/ios/Runner/StyleTransfer.mlpackage
 tools/output/
 tools/.venv/
 *.safetensors

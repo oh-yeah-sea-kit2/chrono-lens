@@ -69,35 +69,38 @@ class StyleTransferPlugin: NSObject, FlutterPlugin {
 
             // Look for the compiled model in the app bundle
             // The .mlpackage gets compiled to .mlmodelc by Xcode automatically
-            guard let modelURL = Bundle.main.url(forResource: "StyleTransfer", withExtension: "mlmodelc") else {
-                // Try .mlpackage fallback
-                if let pkgURL = Bundle.main.url(forResource: "StyleTransfer", withExtension: "mlpackage") {
-                    do {
-                        let compiledURL = try MLModel.compileModel(at: pkgURL)
-                        let config = MLModelConfiguration()
-                        config.computeUnits = .all // Prefer ANE
-                        self.styleModel = try MLModel(contentsOf: compiledURL, configuration: config)
-                        self.isModelLoaded = true
-                        DispatchQueue.main.async { result(true) }
-                    } catch {
-                        DispatchQueue.main.async {
-                            result(FlutterError(code: "MODEL_ERROR", message: error.localizedDescription, details: nil))
-                        }
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        result(FlutterError(code: "MODEL_NOT_FOUND",
-                                          message: "StyleTransfer.mlmodelc not found in bundle",
-                                          details: nil))
-                    }
+            // Xcode compiles .mlpackage → .mlmodelc in the app bundle.
+            // Also try .mlpackage directly as fallback (runtime compilation).
+            let modelURL: URL? = Bundle.main.url(forResource: "StyleTransfer", withExtension: "mlmodelc")
+                ?? Bundle.main.url(forResource: "StyleTransfer", withExtension: "mlpackage")
+
+            guard let url = modelURL else {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "MODEL_NOT_FOUND",
+                                      message: "StyleTransfer model not found in bundle",
+                                      details: nil))
                 }
                 return
+            }
+
+            let finalURL: URL
+            if url.pathExtension == "mlpackage" {
+                do {
+                    finalURL = try MLModel.compileModel(at: url)
+                } catch {
+                    DispatchQueue.main.async {
+                        result(FlutterError(code: "COMPILE_ERROR", message: error.localizedDescription, details: nil))
+                    }
+                    return
+                }
+            } else {
+                finalURL = url
             }
 
             do {
                 let config = MLModelConfiguration()
                 config.computeUnits = .all
-                self.styleModel = try MLModel(contentsOf: modelURL, configuration: config)
+                self.styleModel = try MLModel(contentsOf: finalURL, configuration: config)
                 self.isModelLoaded = true
                 DispatchQueue.main.async { result(true) }
             } catch {
