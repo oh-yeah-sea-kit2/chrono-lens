@@ -160,19 +160,38 @@ img.Image _yuv420ToImage(CameraImage cameraImage) {
   final width = cameraImage.width;
   final height = cameraImage.height;
   final yPlane = cameraImage.planes[0].bytes;
-  final uPlane = cameraImage.planes[1].bytes;
-  final vPlane = cameraImage.planes[2].bytes;
+  final yRowStride = cameraImage.planes[0].bytesPerRow;
+  final uvPlane = cameraImage.planes[1].bytes;
   final uvRowStride = cameraImage.planes[1].bytesPerRow;
-  final uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 1;
+  final uvPixelStride = cameraImage.planes[1].bytesPerPixel ?? 2;
+
+  // iOS NV12: planes[1] has interleaved CbCr (2 planes total)
+  // Android YUV_420_888: planes[1]=U, planes[2]=V (3 planes)
+  final isNV12 = cameraImage.planes.length == 2;
+
+  final Uint8List? vPlane =
+      isNV12 ? null : cameraImage.planes[2].bytes;
 
   final image = img.Image(width: width, height: height);
 
   for (int y = 0; y < height; y++) {
     for (int x = 0; x < width; x++) {
-      final yValue = yPlane[y * width + x];
-      final uvIndex = uvPixelStride * (x ~/ 2) + uvRowStride * (y ~/ 2);
-      final uValue = uPlane[uvIndex];
-      final vValue = vPlane[uvIndex];
+      final yValue = yPlane[y * yRowStride + x];
+
+      int uValue;
+      int vValue;
+
+      if (isNV12) {
+        // NV12: uvPlane has [Cb, Cr, Cb, Cr, ...] interleaved
+        final uvIndex = (y ~/ 2) * uvRowStride + (x ~/ 2) * 2;
+        uValue = uvPlane[uvIndex];
+        vValue = uvPlane[uvIndex + 1];
+      } else {
+        // Android YUV_420_888: separate U and V planes
+        final uvIndex = uvPixelStride * (x ~/ 2) + uvRowStride * (y ~/ 2);
+        uValue = uvPlane[uvIndex];
+        vValue = vPlane![uvIndex];
+      }
 
       final r = (yValue + 1.370705 * (vValue - 128)).clamp(0, 255).toInt();
       final g = (yValue - 0.337633 * (uValue - 128) - 0.698001 * (vValue - 128))
