@@ -41,16 +41,21 @@ class _SetupPageState extends State<SetupPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Spacer(),
-                const Text(
+        child: CustomScrollView(
+          slivers: [
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Spacer(),
+                      const Text(
                   'Chrono Lens',
                   style: TextStyle(
                     color: Colors.white,
@@ -99,7 +104,7 @@ class _SetupPageState extends State<SetupPage> {
                     return null;
                   },
                 ),
-                const Spacer(),
+                const Spacer(flex: 2),
                 SizedBox(
                   width: double.infinity,
                   height: 56,
@@ -128,9 +133,12 @@ class _SetupPageState extends State<SetupPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-              ],
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
