@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 
@@ -69,16 +68,11 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   }
 
   Future<void> _setEraStyle(Era era) async {
-    if (era.styleAsset == null) {
+    if (era.id == 0) {
       _styleService.clearStyle();
       return;
     }
-    try {
-      final data = await rootBundle.load(era.styleAsset!);
-      await _styleService.setStyle(data.buffer.asUint8List());
-    } catch (e) {
-      debugPrint('[CameraPage] Failed to load style asset: $e');
-    }
+    await _styleService.setStyle(era.id);
   }
 
   Future<void> _initCamera() async {

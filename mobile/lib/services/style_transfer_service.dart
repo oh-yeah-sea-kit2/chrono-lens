@@ -3,74 +3,63 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Communicates with the native CoreML StyleTransfer plugin via MethodChannel.
+/// Communicates with the native CIFilter-based era style plugin.
+/// No ML model needed — uses Core Image filters built into iOS.
 class StyleTransferService {
   static const _channel = MethodChannel('com.chrono_lens/style_transfer');
 
-  bool _modelLoaded = false;
-  bool _styleSet = false;
-  bool get isReady => _modelLoaded && _styleSet;
+  bool _ready = false;
+  bool get isReady => _ready;
 
-  /// Load the CoreML model. Call once at startup.
+  int _currentEraId = 0;
+
+  /// Initialize. Always succeeds (no model to load).
   Future<bool> loadModel() async {
     try {
       final result = await _channel.invokeMethod<bool>('loadModel');
-      _modelLoaded = result ?? false;
-      debugPrint('[StyleTransfer] Model loaded: $_modelLoaded');
-      return _modelLoaded;
+      _ready = result ?? false;
+      return _ready;
     } on PlatformException catch (e) {
-      debugPrint('[StyleTransfer] loadModel error: ${e.message}');
-      _modelLoaded = false;
+      debugPrint('[StyleTransfer] init error: ${e.message}');
       return false;
     }
   }
 
-  /// Set the style reference image. Call when era changes.
-  /// [jpegData] is the style image encoded as JPEG.
-  Future<bool> setStyle(Uint8List jpegData) async {
+  /// Set the current era by ID. CIFilter chain is selected on native side.
+  Future<bool> setStyle(int eraId) async {
     try {
+      _currentEraId = eraId;
       final result = await _channel.invokeMethod<bool>('setStyle', {
-        'jpeg': jpegData,
+        'eraId': eraId,
       });
-      _styleSet = result ?? false;
-      debugPrint('[StyleTransfer] Style set: $_styleSet');
-      return _styleSet;
+      return result ?? false;
     } on PlatformException catch (e) {
       debugPrint('[StyleTransfer] setStyle error: ${e.message}');
-      _styleSet = false;
       return false;
     }
   }
 
   /// Clear the style (passthrough mode).
   void clearStyle() {
-    _styleSet = false;
+    _currentEraId = 0;
   }
 
-  /// Apply style transfer to a single JPEG frame.
-  /// Returns stylized JPEG bytes, or null on failure.
+  /// Apply era filter to a single JPEG frame.
+  /// Returns filtered JPEG bytes, or null on failure.
   Future<Uint8List?> transferFrame(Uint8List jpegData, {int quality = 75}) async {
-    if (!_modelLoaded) return null;
-    if (!_styleSet) return jpegData; // passthrough
+    if (!_ready) return null;
+    if (_currentEraId == 0) return jpegData; // passthrough
 
     try {
       final result = await _channel.invokeMethod<Uint8List>('transferFrame', {
         'jpeg': jpegData,
+        'eraId': _currentEraId,
         'quality': quality,
       });
       return result;
     } on PlatformException catch (e) {
       debugPrint('[StyleTransfer] transferFrame error: ${e.message}');
       return null;
-    }
-  }
-
-  /// Check if native side is ready.
-  Future<bool> checkReady() async {
-    try {
-      return await _channel.invokeMethod<bool>('isReady') ?? false;
-    } catch (_) {
-      return false;
     }
   }
 }
