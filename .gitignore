@@ -31,6 +31,10 @@ server/models/
 # Docker
 docker/data/
 
+# fvm
+mobile/.fvm/flutter_sdk
+mobile/.fvm/versions
+
 # Flutter
 mobile/.dart_tool/
 mobile/.flutter-plugins

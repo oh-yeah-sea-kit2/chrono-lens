@@ -73,11 +73,13 @@ uv run pytest
 ### モバイル (Flutter)
 
 ```bash
+# fvm が未インストールの場合
+brew tap leoafarias/fvm && brew install fvm
+fvm install stable
+
 cd mobile
-
-# サーバーIPを設定 (lib/app.dart の _defaultServerUrl を編集)
-# ws://192.168.x.x:8765/stream  ← PCのローカルIPに変更
-
 fvm flutter pub get
-fvm flutter run
+fvm flutter run          # 接続したiPhoneに転送
 ```
+
+初回起動時にIP入力画面が表示されます。PCのIPとポート8765を入力してください。
