@@ -128,9 +128,14 @@ async def capture_endpoint(
     quality: str = Form(default="high"),
 ):
     """High-quality single-frame transformation for shutter mode."""
+    jpeg_data = await image.read()
+    logger.info(
+        "POST /capture: era_id=%s quality=%s filename=%s content_type=%s jpeg_len=%d first_bytes=%s",
+        era_id, quality, image.filename, image.content_type, len(jpeg_data),
+        jpeg_data[:16].hex() if jpeg_data else "empty",
+    )
+
     if PIPELINE == "echo":
-        # Echo mode: return the image as-is
-        jpeg_data = await image.read()
         return JSONResponse({
             "image": base64.b64encode(jpeg_data).decode(),
             "era_id": era_id,
@@ -138,8 +143,6 @@ async def capture_endpoint(
         })
 
     from .pipeline.hq_pipeline import capture as hq_capture
-
-    jpeg_data = await image.read()
     loop = asyncio.get_running_loop()
     result_jpeg, proc_ms = await loop.run_in_executor(
         None, hq_capture, jpeg_data, era_id,
