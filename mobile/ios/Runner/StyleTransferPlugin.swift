@@ -59,6 +59,15 @@ class StyleTransferPlugin: NSObject, FlutterPlugin {
             let quality = args["quality"] as? Int ?? 75
             let eraId = args["eraId"] as? Int ?? currentEraId
             applyFilter(jpegData: jpegData, eraId: eraId, quality: quality, result: result)
+        case "captureRemote":
+            guard let args = call.arguments as? [String: Any],
+                  let jpegData = (args["jpeg"] as? FlutterStandardTypedData)?.data,
+                  let urlString = args["url"] as? String,
+                  let eraId = args["eraId"] as? Int else {
+                result(FlutterError(code: "INVALID_ARGS", message: "jpeg, url, eraId required", details: nil))
+                return
+            }
+            captureRemote(jpegData: jpegData, urlString: urlString, eraId: eraId, result: result)
         case "isReady":
             result(true)
         default:
@@ -281,5 +290,78 @@ class StyleTransferPlugin: NSObject, FlutterPlugin {
         blend.setValue(adjustedNoise, forKey: kCIInputImageKey)
         blend.setValue(image, forKey: kCIInputBackgroundImageKey)
         return blend.outputImage ?? image
+    }
+
+    // MARK: - Remote Capture via native URLSession
+
+    /// POST JPEG to server using iOS native URLSession (bypasses dart:io socket restrictions).
+    private func captureRemote(jpegData: Data, urlString: String, eraId: Int, result: @escaping FlutterResult) {
+        guard let url = URL(string: urlString) else {
+            result(FlutterError(code: "INVALID_URL", message: "Bad URL: \(urlString)", details: nil))
+            return
+        }
+
+        let boundary = "----ChronoLens\(Int(Date().timeIntervalSince1970 * 1000))"
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+
+        var body = Data()
+
+        // era_id field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"era_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(eraId)\r\n".data(using: .utf8)!)
+
+        // quality field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"quality\"\r\n\r\n".data(using: .utf8)!)
+        body.append("high\r\n".data(using: .utf8)!)
+
+        // image file
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"image\"; filename=\"frame.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(jpegData)
+        body.append("\r\n".data(using: .utf8)!)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+
+        NSLog("[StyleTransferPlugin] captureRemote: POST \(urlString) jpeg=\(jpegData.count)B era=\(eraId)")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                NSLog("[StyleTransferPlugin] captureRemote error: \(error)")
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "NETWORK_ERROR", message: error.localizedDescription, details: nil))
+                }
+                return
+            }
+
+            guard let httpResp = response as? HTTPURLResponse else {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "NO_RESPONSE", message: "No HTTP response", details: nil))
+                }
+                return
+            }
+
+            NSLog("[StyleTransferPlugin] captureRemote response: \(httpResp.statusCode)")
+
+            guard httpResp.statusCode == 200, let data = data else {
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "no body"
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "SERVER_ERROR", message: "HTTP \(httpResp.statusCode): \(body)", details: nil))
+                }
+                return
+            }
+
+            // Return raw JSON string to Dart for parsing
+            let jsonStr = String(data: data, encoding: .utf8) ?? ""
+            DispatchQueue.main.async {
+                result(jsonStr)
+            }
+        }.resume()
     }
 }

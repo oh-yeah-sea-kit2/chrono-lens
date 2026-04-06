@@ -44,9 +44,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Use WebSocket for capture (HTTP POST is blocked by iOS local network restrictions)
-    final captureWsUrl = widget.serverUrl.replaceFirst('/stream', '/capture_ws');
-    _captureService = CaptureService(wsUrl: captureWsUrl);
+    _captureService = CaptureService(captureUrl: '${widget.httpUrl}/capture');
     _init();
   }
 

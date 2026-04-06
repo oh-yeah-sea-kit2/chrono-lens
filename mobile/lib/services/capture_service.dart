@@ -1,8 +1,7 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:flutter/services.dart';
 
 import '../models/era.dart';
 
@@ -18,70 +17,44 @@ class CaptureResult {
   final int processingTimeMs;
 }
 
-/// Sends a single frame to the server for high-quality AI transformation
-/// via a dedicated WebSocket connection (HTTP POST is blocked by iOS
-/// local network restrictions on Flutter apps).
+/// Sends a single frame to the server for high-quality AI transformation.
+/// Uses native iOS URLSession via Platform Channel (dart:io sockets are
+/// blocked by iOS local network restrictions, but URLSession works like Safari).
 class CaptureService {
-  CaptureService({required this.wsUrl});
+  CaptureService({required this.captureUrl});
 
-  final String wsUrl; // e.g. ws://192.168.1.234:8765/capture_ws
+  static const _channel = MethodChannel('com.chrono_lens/style_transfer');
+
+  final String captureUrl; // e.g. http://192.168.1.234:8765/capture
 
   Future<CaptureResult> capture(Uint8List jpeg, Era era) async {
-    debugPrint('[Capture] Connecting to $wsUrl');
+    debugPrint('[Capture] captureRemote: $captureUrl era=${era.id} jpeg=${jpeg.length}B');
 
-    final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-    await channel.ready;
-    debugPrint('[Capture] Connected. Sending capture request: era=${era.id} jpeg=${jpeg.length}B');
+    try {
+      final jsonStr = await _channel.invokeMethod<String>('captureRemote', {
+        'jpeg': jpeg,
+        'url': captureUrl,
+        'eraId': era.id,
+      });
 
-    // Send JSON command first
-    channel.sink.add(jsonEncode({
-      'type': 'capture',
-      'era_id': era.id,
-    }));
+      if (jsonStr == null || jsonStr.isEmpty) {
+        throw Exception('Empty response from server');
+      }
 
-    // Then send JPEG as binary
-    channel.sink.add(jpeg);
+      debugPrint('[Capture] Response received: ${jsonStr.length} chars');
 
-    // Wait for JSON response
-    final completer = Completer<CaptureResult>();
-    late StreamSubscription sub;
+      final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final imageBase64 = json['image'] as String;
+      final imageBytes = base64Decode(imageBase64);
 
-    sub = channel.stream.listen(
-      (data) {
-        if (data is String) {
-          debugPrint('[Capture] Response received: ${data.length} chars');
-          try {
-            final json = jsonDecode(data) as Map<String, dynamic>;
-            if (json.containsKey('error')) {
-              completer.completeError(Exception(json['error']));
-            } else {
-              final imageBase64 = json['image'] as String;
-              final imageBytes = base64Decode(imageBase64);
-              completer.complete(CaptureResult(
-                image: Uint8List.fromList(imageBytes),
-                eraId: json['era_id'] as int,
-                processingTimeMs: json['processing_time_ms'] as int,
-              ));
-            }
-          } catch (e) {
-            completer.completeError(e);
-          }
-          sub.cancel();
-          channel.sink.close();
-        }
-      },
-      onError: (e) {
-        debugPrint('[Capture] WS error: $e');
-        if (!completer.isCompleted) completer.completeError(e);
-        sub.cancel();
-      },
-      onDone: () {
-        if (!completer.isCompleted) {
-          completer.completeError(Exception('WebSocket closed before response'));
-        }
-      },
-    );
-
-    return completer.future.timeout(const Duration(seconds: 30));
+      return CaptureResult(
+        image: Uint8List.fromList(imageBytes),
+        eraId: json['era_id'] as int,
+        processingTimeMs: json['processing_time_ms'] as int,
+      );
+    } on PlatformException catch (e) {
+      debugPrint('[Capture] PlatformException: ${e.code} ${e.message}');
+      rethrow;
+    }
   }
 }
