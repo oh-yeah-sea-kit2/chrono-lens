@@ -44,7 +44,9 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _captureService = CaptureService(baseUrl: widget.httpUrl);
+    // Use WebSocket for capture (HTTP POST is blocked by iOS local network restrictions)
+    final captureWsUrl = widget.serverUrl.replaceFirst('/stream', '/capture_ws');
+    _captureService = CaptureService(wsUrl: captureWsUrl);
     _init();
   }
 
@@ -172,7 +174,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     setState(() => _isCapturing = true);
 
     try {
-      debugPrint('[CameraPage] Shutter: sending ${jpeg.length}B to server');
+      debugPrint('[CameraPage] Shutter: sending ${jpeg.length}B via WebSocket');
 
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ResultPage(

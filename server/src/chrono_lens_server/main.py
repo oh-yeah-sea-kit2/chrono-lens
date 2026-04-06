@@ -9,6 +9,7 @@ Hybrid architecture:
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import socket
@@ -153,6 +154,58 @@ async def capture_endpoint(
         "era_id": era_id,
         "processing_time_ms": proc_ms,
     })
+
+
+@app.websocket("/capture_ws")
+async def capture_ws_endpoint(websocket: WebSocket):
+    """WebSocket-based capture for iOS (HTTP POST blocked by local network restrictions)."""
+    await websocket.accept()
+    logger.info("Capture WS connected")
+
+    try:
+        # 1. Receive JSON command
+        cmd_raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        cmd = json.loads(cmd_raw)
+        era_id = cmd.get("era_id", 1)
+        logger.info("Capture WS: era_id=%s", era_id)
+
+        # 2. Receive JPEG binary
+        jpeg_data = await asyncio.wait_for(websocket.receive_bytes(), timeout=10.0)
+        logger.info("Capture WS: received %d bytes, first=%s", len(jpeg_data), jpeg_data[:4].hex())
+
+        if PIPELINE == "echo":
+            result_json = {
+                "image": base64.b64encode(jpeg_data).decode(),
+                "era_id": era_id,
+                "processing_time_ms": 0,
+            }
+        else:
+            from .pipeline.hq_pipeline import capture as hq_capture
+            loop = asyncio.get_running_loop()
+            result_jpeg, proc_ms = await loop.run_in_executor(
+                None, hq_capture, jpeg_data, era_id,
+            )
+            result_json = {
+                "image": base64.b64encode(result_jpeg).decode(),
+                "era_id": era_id,
+                "processing_time_ms": proc_ms,
+            }
+
+        # 3. Send JSON response
+        await websocket.send_text(json.dumps(result_json))
+        logger.info("Capture WS: sent result (%d chars)", len(json.dumps(result_json)))
+
+    except Exception as e:
+        logger.exception("Capture WS error: %s", e)
+        try:
+            await websocket.send_text(json.dumps({"error": str(e)}))
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.websocket("/stream")

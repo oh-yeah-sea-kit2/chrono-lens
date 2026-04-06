@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/era.dart';
 
@@ -17,74 +18,70 @@ class CaptureResult {
   final int processingTimeMs;
 }
 
-/// Sends a single frame to the server for high-quality AI transformation.
-/// Uses dart:io HttpClient directly (Flutter's http package has issues
-/// with local network connections on iOS).
+/// Sends a single frame to the server for high-quality AI transformation
+/// via a dedicated WebSocket connection (HTTP POST is blocked by iOS
+/// local network restrictions on Flutter apps).
 class CaptureService {
-  CaptureService({required this.baseUrl});
+  CaptureService({required this.wsUrl});
 
-  final String baseUrl;
-  final _client = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 10)
-    ..idleTimeout = const Duration(seconds: 30);
+  final String wsUrl; // e.g. ws://192.168.1.234:8765/capture_ws
 
   Future<CaptureResult> capture(Uint8List jpeg, Era era) async {
-    final uri = Uri.parse('$baseUrl/capture');
-    debugPrint('[Capture] POST $uri era=${era.id} jpeg=${jpeg.length}B');
+    debugPrint('[Capture] Connecting to $wsUrl');
 
-    // Build multipart/form-data body manually
-    final boundary = '----ChronoLens${DateTime.now().millisecondsSinceEpoch}';
-    final bodyParts = <List<int>>[];
+    final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+    await channel.ready;
+    debugPrint('[Capture] Connected. Sending capture request: era=${era.id} jpeg=${jpeg.length}B');
 
-    // era_id field
-    bodyParts.add(utf8.encode('--$boundary\r\n'));
-    bodyParts.add(utf8.encode('Content-Disposition: form-data; name="era_id"\r\n\r\n'));
-    bodyParts.add(utf8.encode('${era.id}\r\n'));
+    // Send JSON command first
+    channel.sink.add(jsonEncode({
+      'type': 'capture',
+      'era_id': era.id,
+    }));
 
-    // quality field
-    bodyParts.add(utf8.encode('--$boundary\r\n'));
-    bodyParts.add(utf8.encode('Content-Disposition: form-data; name="quality"\r\n\r\n'));
-    bodyParts.add(utf8.encode('high\r\n'));
+    // Then send JPEG as binary
+    channel.sink.add(jpeg);
 
-    // image file
-    bodyParts.add(utf8.encode('--$boundary\r\n'));
-    bodyParts.add(utf8.encode('Content-Disposition: form-data; name="image"; filename="frame.jpg"\r\n'));
-    bodyParts.add(utf8.encode('Content-Type: image/jpeg\r\n\r\n'));
-    bodyParts.add(jpeg);
-    bodyParts.add(utf8.encode('\r\n'));
+    // Wait for JSON response
+    final completer = Completer<CaptureResult>();
+    late StreamSubscription sub;
 
-    // End boundary
-    bodyParts.add(utf8.encode('--$boundary--\r\n'));
+    sub = channel.stream.listen(
+      (data) {
+        if (data is String) {
+          debugPrint('[Capture] Response received: ${data.length} chars');
+          try {
+            final json = jsonDecode(data) as Map<String, dynamic>;
+            if (json.containsKey('error')) {
+              completer.completeError(Exception(json['error']));
+            } else {
+              final imageBase64 = json['image'] as String;
+              final imageBytes = base64Decode(imageBase64);
+              completer.complete(CaptureResult(
+                image: Uint8List.fromList(imageBytes),
+                eraId: json['era_id'] as int,
+                processingTimeMs: json['processing_time_ms'] as int,
+              ));
+            }
+          } catch (e) {
+            completer.completeError(e);
+          }
+          sub.cancel();
+          channel.sink.close();
+        }
+      },
+      onError: (e) {
+        debugPrint('[Capture] WS error: $e');
+        if (!completer.isCompleted) completer.completeError(e);
+        sub.cancel();
+      },
+      onDone: () {
+        if (!completer.isCompleted) {
+          completer.completeError(Exception('WebSocket closed before response'));
+        }
+      },
+    );
 
-    final body = bodyParts.expand((e) => e).toList();
-
-    try {
-      final request = await _client.postUrl(uri);
-      request.headers.set('Content-Type', 'multipart/form-data; boundary=$boundary');
-      request.contentLength = body.length;
-      request.add(body);
-
-      final response = await request.close().timeout(const Duration(seconds: 30));
-      final responseBody = await response.transform(utf8.decoder).join();
-
-      debugPrint('[Capture] Response: ${response.statusCode} (${responseBody.length} chars)');
-
-      if (response.statusCode != 200) {
-        throw Exception('Capture failed: ${response.statusCode} $responseBody');
-      }
-
-      final json = jsonDecode(responseBody) as Map<String, dynamic>;
-      final imageBase64 = json['image'] as String;
-      final imageBytes = base64Decode(imageBase64);
-
-      return CaptureResult(
-        image: Uint8List.fromList(imageBytes),
-        eraId: json['era_id'] as int,
-        processingTimeMs: json['processing_time_ms'] as int,
-      );
-    } on SocketException catch (e) {
-      debugPrint('[Capture] SocketException: $e');
-      rethrow;
-    }
+    return completer.future.timeout(const Duration(seconds: 30));
   }
 }
