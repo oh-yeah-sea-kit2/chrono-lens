@@ -30,6 +30,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
 
   Era _selectedEra = Era.taisho;
   Uint8List? _styledFrame; // Latest style-transferred preview frame
+  Uint8List? _lastRawJpeg; // Latest raw JPEG from camera (for shutter)
   bool _isCapturing = false; // Shutter in progress
   bool _modelReady = false;
   bool _processing = false; // Style transfer in progress for current frame
@@ -117,7 +118,10 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
         return;
       }
 
-      // Run style transfer via CoreML
+      // Keep raw JPEG for shutter use
+      _lastRawJpeg = jpeg;
+
+      // Run style filter via CIFilter
       final styled = await _styleService.transferFrame(jpeg);
       sw.stop();
 
@@ -154,39 +158,30 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     }
   }
 
-  /// Shutter: capture current frame and send to server for HQ transformation
+  /// Shutter: send latest camera frame to server for HQ transformation.
+  /// Does NOT stop the camera stream — uses the last captured JPEG.
   Future<void> _onShutter() async {
     if (_isCapturing) return;
-    final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized) return;
+
+    final jpeg = _lastRawJpeg;
+    if (jpeg == null) {
+      debugPrint('[CameraPage] No frame available yet');
+      return;
+    }
 
     setState(() => _isCapturing = true);
 
     try {
-      // Stop streaming to freeze preview
-      await controller.stopImageStream();
+      debugPrint('[CameraPage] Shutter: sending ${jpeg.length}B to server');
 
-      // Take a photo
-      final xFile = await controller.takePicture();
-      final originalJpeg = await xFile.readAsBytes();
-
-      if (!mounted) return;
-
-      // Navigate to result page (it handles the server call)
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ResultPage(
-          originalJpeg: Uint8List.fromList(originalJpeg),
+          originalJpeg: jpeg,
           era: _selectedEra,
           captureService: _captureService,
-          // Also pass the styled preview as a quick preview while loading
           styledPreview: _styledFrame,
         ),
       ));
-
-      // Resume camera after returning
-      if (mounted && controller.value.isInitialized) {
-        await controller.startImageStream(_onCameraFrame);
-      }
     } catch (e) {
       debugPrint('[CameraPage] Shutter error: $e');
     } finally {
