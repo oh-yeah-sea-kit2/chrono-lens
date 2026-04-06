@@ -44,19 +44,20 @@ Flutter (Mobile) <--WebSocket--> Python GPU Server
 ### サーバー
 
 ```bash
-# 依存インストール
-pip install -r server/requirements/base.txt     # Phase 1 (GPU不要)
-pip install -r server/requirements/gpu.txt      # Phase 2以降 (CUDA必須)
+cd server
 
-# 設定ファイル
-cp .env.example .env
-# PIPELINE=echo     → Phase 1（AI無し）
-# PIPELINE=lcm      → Phase 2（SD1.5 + LCM）
-# PIPELINE=controlnet → Phase 3（ControlNet）
+# Phase 1 (GPU不要)
+uv sync
+
+# Phase 2以降 (CUDA必須)
+uv sync --extra gpu
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 # 起動
-cd server
-PIPELINE=echo uvicorn src.chrono_lens_server.main:app --host 0.0.0.0 --port 8765
+# PIPELINE=echo     → Phase 1（AI無し、デフォルト）
+# PIPELINE=lcm      → Phase 2（SD1.5 + LCM）
+# PIPELINE=controlnet → Phase 3（ControlNet）
+uv run uvicorn src.chrono_lens_server.main:app --host 0.0.0.0 --port 8765
 
 # または Docker (GPU環境)
 docker compose -f docker/docker-compose.yml up
@@ -65,8 +66,8 @@ docker compose -f docker/docker-compose.yml up
 テスト実行:
 ```bash
 cd server
-pip install -r requirements/dev.txt
-pytest tests/
+uv sync --extra dev
+uv run pytest
 ```
 
 ### モバイル (Flutter)
