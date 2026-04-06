@@ -48,21 +48,22 @@ def get_device() -> str:
 
 
 def load_lcm_pipeline():
-    """Load SD1.5 + LCM pipeline."""
+    """Load SD1.5 + LCM img2img pipeline."""
     import torch
-    from diffusers import DiffusionPipeline
+    from diffusers import AutoPipelineForImage2Image
 
     device, dtype = _get_device_and_dtype()
 
-    logger.info("Loading LCM pipeline: %s → %s (%s)", MODEL_ID, device, dtype)
+    logger.info("Loading LCM img2img pipeline: %s → %s (%s)", MODEL_ID, device, dtype)
     t0 = time.monotonic()
 
-    pipe = DiffusionPipeline.from_pretrained(
+    pipe = AutoPipelineForImage2Image.from_pretrained(
         MODEL_ID,
         torch_dtype=dtype,
         safety_checker=None,
         requires_safety_checker=False,
     ).to(device)
+    logger.info("Pipeline class: %s", type(pipe).__name__)
     logger.info("Safety checker disabled (camera feed triggers false positives)")
 
     if device == "cuda":
@@ -72,7 +73,7 @@ def load_lcm_pipeline():
         except Exception:
             logger.warning("xformers not available")
 
-    # Warmup inference
+    # Warmup inference with img2img
     logger.info("Running warmup inference...")
     from PIL import Image
     dummy = Image.new("RGB", (512, 512), color=(128, 128, 128))
@@ -87,7 +88,7 @@ def load_lcm_pipeline():
     )
 
     elapsed = time.monotonic() - t0
-    logger.info("LCM pipeline ready in %.1fs on %s", elapsed, device)
+    logger.info("LCM img2img pipeline ready in %.1fs on %s", elapsed, device)
     return pipe
 
 
