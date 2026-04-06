@@ -1,11 +1,18 @@
 # chrono-lens — CLAUDE.md
 
+## プロジェクト概要
+
+「目の前の風景を昔っぽく見せる」カメラアプリ。ハイブリッドアーキテクチャ:
+- **プレビュー**: デバイス上でCoreMLスタイル転送（リアルタイム、雰囲気レベル）
+- **シャッター**: サーバーでSD1.5 img2img高品質変換（3-5秒、本気の変換）
+
 ## プロジェクト構成
 
 ```
 chrono-lens/
-├── server/   Python FastAPI WebSocket サーバー（AI推論）
-└── mobile/   Flutter カメラアプリ（iOS / Android）
+├── server/    Python FastAPI サーバー（POST /capture で高品質AI変換）
+├── mobile/    Flutter カメラアプリ（iOS / Android）
+└── tools/     CoreMLモデル変換・スタイル画像生成スクリプト
 ```
 
 ---
@@ -19,27 +26,32 @@ Python パッケージ管理は **uv** を使う。pip / poetry は使わない�
 ```bash
 cd server
 
-uv sync                  # Phase 1（GPU不要）
-uv sync --extra gpu      # Phase 2以降（CUDA必須）
+uv sync                  # 基本依存のみ
+uv sync --extra mps      # Apple Silicon (MPS)
+uv sync --extra gpu      # NVIDIA GPU (CUDA)
 uv sync --extra dev      # テスト・Lint
 
 uv run uvicorn src.chrono_lens_server.main:app --host 0.0.0.0 --port 8765
 uv run pytest
 ```
 
+### エンドポイント
+
+| エンドポイント | 用途 |
+|---|---|
+| `GET /health` | ステータス確認 |
+| `POST /capture` | シャッター高品質変換（image + era_id） |
+| `WebSocket /stream` | レガシー リアルタイムストリーム |
+
 ### パイプライン切り替え
 
-環境変数 `PIPELINE` でフェーズを切り替える：
+環境変数 `PIPELINE` で制御:
 
-| 値 | フェーズ | GPU |
+| 値 | 内容 | GPU |
 |---|---|---|
-| `echo`（デフォルト） | Phase 1: エコーのみ | 不要 |
-| `lcm` | Phase 2: SD1.5 + LCM | 必須 |
-| `controlnet` | Phase 3: ControlNet Canny | 必須 |
-
-```bash
-PIPELINE=echo uv run uvicorn src.chrono_lens_server.main:app --host 0.0.0.0 --port 8765
-```
+| `echo`（デフォルト） | エコーのみ | 不要 |
+| `lcm` | SD1.5 + LCM img2img | 必須（MPS or CUDA）|
+| `controlnet` | ControlNet Canny | 必須 |
 
 ### 依存追加のルール
 
@@ -55,69 +67,54 @@ Flutter バージョン管理は **fvm** を使う。グローバルの flutter 
 
 ```bash
 cd mobile
-
 fvm flutter pub get
-fvm flutter run          # 実機転送
-fvm flutter build ios    # リリースビルド
+fvm flutter run
 ```
 
-バージョンは `mobile/.fvmrc` で `stable` に固定済み。新しいバージョンに変更する場合は `.fvmrc` を編集してから `fvm install`。
+### アーキテクチャ
+
+```
+Camera 30fps
+  → 3フレームに1回 JPEG変換 (Isolate)
+  → CoreML Style Transfer (Platform Channel, Swift)
+  → Image.memory で表示
+
+[シャッター]
+  → takePicture()
+  → HTTP POST /capture (サーバー)
+  → ResultPage (Before/After比較、保存、共有)
+```
+
+### Platform Channel
+
+| チャンネル | 用途 |
+|---|---|
+| `com.chrono_lens/style_transfer` | CoreMLスタイル転送 |
+
+メソッド: `loadModel`, `setStyle`, `transferFrame`, `isReady`
+
+### CoreMLモデル
+
+`tools/convert_style_model.py` でMagenta Arbitrary Style Transferモデルを変換。
+変換済み `.mlpackage` は `mobile/ios/Runner/Models/` に配置。
 
 ### 実機テスト前提条件
 
-- iPhoneとMacが**同じWi-Fi**に接続されていること
-- サーバーが `--host 0.0.0.0` で起動していること
-- アプリ初回起動時にMacのローカルIPを入力（設定はSharedPreferencesに保存される）
-
----
-
-## WebSocket バイナリプロトコル
-
-### クライアント → サーバー（32バイトヘッダー + JPEG）
-
-| Offset | 型 | 内容 |
-|---|---|---|
-| 0-1 | `bytes` | Magic `0x43 0x4C`（"CL"）|
-| 2 | `uint8` | Version = 1 |
-| 3 | `uint8` | msg_type = 0x01 |
-| 4-11 | `uint64 LE` | frame_id（単調増加）|
-| 12-19 | `uint64 LE` | client_ts_us（Unix マイクロ秒）|
-| 20-21 | `uint16 LE` | width |
-| 22-23 | `uint16 LE` | height |
-| 24 | `uint8` | era_id |
-| 25 | `uint8` | JPEG quality hint |
-| 26-27 | `uint16 LE` | reserved |
-| 28-31 | `uint32 LE` | payload_len |
-| 32〜 | `bytes` | JPEG データ |
-
-### サーバー → クライアント（40バイトヘッダー + JPEG）
-
-| Offset | 型 | 内容 |
-|---|---|---|
-| 0-1 | `bytes` | Magic `0x43 0x4C` |
-| 2 | `uint8` | Version = 1 |
-| 3 | `uint8` | msg_type（0x02=RESULT, 0x10=ECHO）|
-| 4-11 | `uint64 LE` | frame_id（クライアントのechoback）|
-| 12-19 | `uint64 LE` | client_ts_us（echoback）|
-| 20-27 | `uint64 LE` | server_ts_us |
-| 28-31 | `uint32 LE` | proc_us（サーバー処理時間）|
-| 32 | `uint8` | era_id |
-| 33 | `uint8` | flags（bit0=dropped）|
-| 34-35 | `uint16 LE` | reserved |
-| 36-39 | `uint32 LE` | payload_len |
-| 40〜 | `bytes` | JPEG データ |
+- iPhoneとMacが同じWi-Fiに接続
+- サーバーが `--host 0.0.0.0` で起動
+- mDNSでサーバー自動検出（手動IP入力も可）
 
 ---
 
 ## Era ID
 
-| ID | 時代 |
-|---|---|
-| 0x00 | パススルー（変換なし）|
-| 0x01 | 大正（1912–1926）|
-| 0x02 | 昭和初期（1926–1945）|
-| 0x03 | 昭和中期（1945–1970）|
-| 0x04 | 明治（1868–1912）|
+| ID | 時代 | スタイル画像 |
+|---|---|---|
+| 0x00 | パススルー | なし |
+| 0x01 | 大正（1912–1926）| `assets/styles/taisho.jpg` |
+| 0x02 | 昭和初期（1926–1945）| `assets/styles/showa_early.jpg` |
+| 0x03 | 昭和中期（1945–1970）| `assets/styles/showa_mid.jpg` |
+| 0x04 | 明治（1868–1912）| `assets/styles/meiji.jpg` |
 
 ---
 

@@ -1,0 +1,5 @@
+tensorflow>=2.15
+tensorflow-hub>=0.16
+coremltools>=8.0
+numpy>=1.26
+Pillow>=10

@@ -1,17 +1,22 @@
 """
-chrono-lens WebSocket server entry point.
+chrono-lens server entry point.
 
-Phase 1: echo server
-Phase 2+: replace process_func with LCM/ControlNet pipeline
+Hybrid architecture:
+- POST /capture: high-quality single-frame transformation (shutter mode)
+- WebSocket /stream: legacy real-time streaming (may be removed)
+- GET /health: server status
 """
 
+import asyncio
+import base64
 import logging
 import os
 import socket
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from zeroconf import ServiceInfo
 from zeroconf.asyncio import AsyncZeroconf
 
@@ -114,6 +119,37 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "0.1.0", "mode": PIPELINE}
+
+
+@app.post("/capture")
+async def capture_endpoint(
+    image: UploadFile = File(...),
+    era_id: int = Form(default=1),
+    quality: str = Form(default="high"),
+):
+    """High-quality single-frame transformation for shutter mode."""
+    if PIPELINE == "echo":
+        # Echo mode: return the image as-is
+        jpeg_data = await image.read()
+        return JSONResponse({
+            "image": base64.b64encode(jpeg_data).decode(),
+            "era_id": era_id,
+            "processing_time_ms": 0,
+        })
+
+    from .pipeline.hq_pipeline import capture as hq_capture
+
+    jpeg_data = await image.read()
+    loop = asyncio.get_running_loop()
+    result_jpeg, proc_ms = await loop.run_in_executor(
+        None, hq_capture, jpeg_data, era_id,
+    )
+
+    return JSONResponse({
+        "image": base64.b64encode(result_jpeg).decode(),
+        "era_id": era_id,
+        "processing_time_ms": proc_ms,
+    })
 
 
 @app.websocket("/stream")

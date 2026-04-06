@@ -41,6 +41,10 @@ dependencies:
   permission_handler: ^11.3.1
   shared_preferences: ^2.3.2
   bonsoir: ^6.0.2
+  http: ^1.2.0
+  image_gallery_saver_plus: ^4.0.1
+  share_plus: ^10.1.4
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:
@@ -60,6 +64,12 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/styles/taisho.jpg
+    - assets/styles/showa_early.jpg
+    - assets/styles/showa_mid.jpg
+    - assets/styles/meiji.jpg
 
   # To add assets to your application, add an assets section, like this:
   # assets:

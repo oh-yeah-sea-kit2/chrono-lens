@@ -12,5 +12,7 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // Register custom platform plugins
+    StyleTransferPlugin.register(with: engineBridge.pluginRegistry.registrar(forPlugin: "StyleTransferPlugin")!)
   }
 }
