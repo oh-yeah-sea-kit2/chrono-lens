@@ -63,7 +63,7 @@ async def process(frame) -> bytes:
     global _prev_result_pil
     import torch
     from .edge_detector import jpeg_to_canny
-    from .model_loader import FIXED_SEED, get_controlnet_pipeline  # noqa: PLC0415
+    from .model_loader import FIXED_SEED, get_controlnet_pipeline, get_device
     from .prompt_templates import get_prompts
 
     pipe = get_controlnet_pipeline()
@@ -75,7 +75,8 @@ async def process(frame) -> bytes:
     init_image = _jpeg_to_pil(frame.jpeg)
     control_image = jpeg_to_canny(frame.jpeg)
 
-    generator = torch.Generator(device="cuda").manual_seed(FIXED_SEED)
+    device = get_device()
+    generator = torch.Generator(device=device).manual_seed(FIXED_SEED)
 
     result = pipe(
         prompt=prompt,

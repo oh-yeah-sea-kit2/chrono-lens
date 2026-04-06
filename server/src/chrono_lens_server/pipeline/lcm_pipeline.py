@@ -32,7 +32,7 @@ async def process(frame) -> bytes:
     frame: ClientFrame from protocol.py
     """
     import torch
-    from .model_loader import FIXED_SEED, get_lcm_pipeline  # noqa: PLC0415
+    from .model_loader import FIXED_SEED, get_device, get_lcm_pipeline
     from .prompt_templates import get_prompts
 
     pipe = get_lcm_pipeline()
@@ -43,7 +43,8 @@ async def process(frame) -> bytes:
     prompt, negative_prompt = get_prompts(frame.era_id)
     init_image = _jpeg_to_pil(frame.jpeg)
 
-    generator = torch.Generator(device="cuda").manual_seed(FIXED_SEED)
+    device = get_device()
+    generator = torch.Generator(device=device).manual_seed(FIXED_SEED)
 
     result = pipe(
         prompt=prompt,

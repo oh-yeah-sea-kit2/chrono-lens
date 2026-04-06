@@ -13,6 +13,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Apple Silicon (MPS) — no xformers needed, torch from PyPI supports MPS
+mps = [
+    "torch>=2.2",
+    "diffusers>=0.27",
+    "transformers>=4.40",
+    "accelerate>=0.29",
+]
+# NVIDIA GPU (CUDA) — install torch separately with --index-url
 gpu = [
     "diffusers>=0.27",
     "transformers>=4.40",
@@ -27,8 +35,8 @@ dev = [
 ]
 
 [tool.uv]
-# torch はCUDA版を使うため別途インストール
-# uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Apple Silicon: uv sync --extra mps (torch from PyPI includes MPS)
+# NVIDIA GPU:   uv sync --extra gpu && uv pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
