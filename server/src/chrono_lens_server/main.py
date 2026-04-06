@@ -63,7 +63,7 @@ async def _register_mdns(port: int) -> None:
         SERVICE_NAME,
         addresses=[socket.inet_aton(ip)],
         port=port,
-        properties={"pipeline": PIPELINE, "version": "0.1.0"},
+        properties={"pipeline": PIPELINE, "version": "0.1.0", "ip": ip},
     )
     _async_zc = AsyncZeroconf()
     await _async_zc.async_register_service(_service_info)
