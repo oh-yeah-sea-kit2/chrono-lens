@@ -12,7 +12,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from zeroconf import ServiceInfo, Zeroconf
+from zeroconf import ServiceInfo
+from zeroconf.asyncio import AsyncZeroconf
 
 from .ws.handler import handle_connection, set_process_func
 
@@ -33,7 +34,8 @@ PORT = int(os.getenv("PORT", "8765"))
 SERVICE_TYPE = "_chrono-lens._tcp.local."
 SERVICE_NAME = "chrono-lens._chrono-lens._tcp.local."
 
-_zeroconf: Zeroconf | None = None
+_async_zc: AsyncZeroconf | None = None
+_service_info: ServiceInfo | None = None
 
 
 def _get_local_ip() -> str:
@@ -48,32 +50,34 @@ def _get_local_ip() -> str:
         s.close()
 
 
-def _register_mdns(port: int) -> None:
-    global _zeroconf
+async def _register_mdns(port: int) -> None:
+    global _async_zc, _service_info
     ip = _get_local_ip()
-    info = ServiceInfo(
+    _service_info = ServiceInfo(
         SERVICE_TYPE,
         SERVICE_NAME,
         addresses=[socket.inet_aton(ip)],
         port=port,
         properties={"pipeline": PIPELINE, "version": "0.1.0"},
     )
-    _zeroconf = Zeroconf()
-    _zeroconf.register_service(info)
+    _async_zc = AsyncZeroconf()
+    await _async_zc.async_register_service(_service_info)
     logger.info("mDNS registered: %s @ %s:%d", SERVICE_NAME, ip, port)
 
 
-def _unregister_mdns() -> None:
-    global _zeroconf
-    if _zeroconf:
-        _zeroconf.unregister_all_services()
-        _zeroconf.close()
-        _zeroconf = None
+async def _unregister_mdns() -> None:
+    global _async_zc, _service_info
+    if _async_zc:
+        if _service_info:
+            await _async_zc.async_unregister_service(_service_info)
+        await _async_zc.async_close()
+        _async_zc = None
+        _service_info = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _register_mdns(PORT)
+    await _register_mdns(PORT)
 
     if PIPELINE == "echo":
         logger.info("Server starting up in ECHO mode (Phase 1)")
@@ -93,7 +97,7 @@ async def lifespan(app: FastAPI):
         logger.warning("Unknown PIPELINE=%s, falling back to echo", PIPELINE)
 
     yield
-    _unregister_mdns()
+    await _unregister_mdns()
     logger.info("Server shutting down")
 
 
