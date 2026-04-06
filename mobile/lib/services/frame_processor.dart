@@ -77,11 +77,14 @@ class FrameProcessor {
   ///
   /// Only returns non-null when the server is ready for the next frame.
   Future<Uint8List?> process(CameraImage image) async {
-    // Allow the very first frame through unconditionally
+    // Strict ping-pong: only one frame at a time.
+    // Set _inFlight SYNCHRONOUSLY before any await to prevent race conditions.
     if (_started && _inFlight) {
       _skippedCount++;
       return null;
     }
+    // Lock immediately — no other camera callback can slip through
+    _inFlight = true;
 
     // Copy native camera data to Dart heap before Isolate
     final snapshot = _FrameSnapshot(
@@ -97,7 +100,10 @@ class FrameProcessor {
     );
 
     final jpeg = await _encodeFrame(snapshot);
-    if (jpeg == null) return null;
+    if (jpeg == null) {
+      _inFlight = false; // release lock on encode failure
+      return null;
+    }
 
     _frameIdCounter++;
     final frameId = _frameIdCounter;
@@ -110,7 +116,6 @@ class FrameProcessor {
       jpeg: jpeg,
     );
 
-    _inFlight = true;
     _started = true;
     _sentCount++;
 

@@ -154,7 +154,10 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
         children: [
           // Main view: AI result or camera preview fallback
           if (_latestJpeg != null)
-            CrossfadeRenderer(jpeg: _latestJpeg!)
+            CrossfadeRenderer(
+              jpeg: _latestJpeg!,
+              fadeDuration: const Duration(milliseconds: 500),
+            )
           else if (_cameraController?.value.isInitialized == true)
             CameraPreview(_cameraController!)
           else
