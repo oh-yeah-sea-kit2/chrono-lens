@@ -2,16 +2,14 @@
 """
 Convert Google Magenta Arbitrary Style Transfer model to CoreML.
 
-This script downloads the TF Hub model and converts both networks:
-  1. Style Prediction Network: style image → style vector (run once per style)
-  2. Style Transfer Network: content image + style vector → stylized image (run per frame)
+The TF Hub model takes (content_image, style_image) and returns [stylized_image].
+We convert it as a single combined model (no separate style predictor).
 
 Usage:
-    pip install tensorflow coremltools tensorflow-hub
+    pip install tensorflow coremltools tensorflow-hub setuptools
     python tools/convert_style_model.py
 
 Output:
-    tools/output/StylePredictor.mlpackage
     tools/output/StyleTransfer.mlpackage
 """
 
@@ -26,142 +24,99 @@ import tensorflow_hub as hub
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 MODEL_URL = "https://tfhub.dev/google/magenta/arbitrary-image-stylization-v1-256/2"
 
-STYLE_IMAGE_SIZE = 256
-CONTENT_IMAGE_SIZE = 384  # Slightly larger for better quality on phone
+CONTENT_SIZE = 384
+STYLE_SIZE = 256
 
 
-def download_model():
-    """Load the TF Hub model."""
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
     print(f"Loading model from {MODEL_URL}...")
-    model = hub.load(MODEL_URL)
+    hub_model = hub.load(MODEL_URL)
     print("Model loaded successfully")
-    return model
+    print(f"  Signatures: {list(hub_model.signatures.keys()) if hasattr(hub_model, 'signatures') else 'N/A'}")
 
-
-def export_style_predictor(model):
-    """
-    Extract and convert the style prediction network.
-    Input: style image [1, 256, 256, 3] float32 (0-1)
-    Output: style bottleneck vector [1, 1, 1, 100]
-    """
-    print("\n--- Converting Style Predictor ---")
-
+    # Wrap the model call in a tf.function with explicit input signatures
     @tf.function(input_signature=[
-        tf.TensorSpec(shape=[1, STYLE_IMAGE_SIZE, STYLE_IMAGE_SIZE, 3], dtype=tf.float32)
+        tf.TensorSpec(shape=[1, CONTENT_SIZE, CONTENT_SIZE, 3], dtype=tf.float32),
+        tf.TensorSpec(shape=[1, STYLE_SIZE, STYLE_SIZE, 3], dtype=tf.float32),
     ])
-    def predict_style(style_image):
-        return model.call(
-            tf.zeros([1, CONTENT_IMAGE_SIZE, CONTENT_IMAGE_SIZE, 3]),
-            style_image,
-        )[1]  # [1] is the style bottleneck
+    def stylize(content_image, style_image):
+        # hub_model(content, style) returns [stylized_image]
+        return hub_model(content_image, style_image)[0]
 
-    concrete = predict_style.get_concrete_function()
+    print("\nTracing tf.function...")
+    concrete = stylize.get_concrete_function()
+    print("  Traced successfully")
 
+    # Verify with dummy data
+    print("Testing with dummy data...")
+    dummy_content = np.random.rand(1, CONTENT_SIZE, CONTENT_SIZE, 3).astype(np.float32)
+    dummy_style = np.random.rand(1, STYLE_SIZE, STYLE_SIZE, 3).astype(np.float32)
+    result = stylize(tf.constant(dummy_content), tf.constant(dummy_style))
+    print(f"  Output shape: {result.shape}, range: [{result.numpy().min():.3f}, {result.numpy().max():.3f}]")
+
+    # Save as SavedModel first (coremltools needs this format)
+    saved_model_dir = os.path.join(OUTPUT_DIR, "saved_model_tmp")
+    if os.path.exists(saved_model_dir):
+        shutil.rmtree(saved_model_dir)
+
+    print("\nExporting to SavedModel...")
+
+    class StylizeModule(tf.Module):
+        def __init__(self, hub_model):
+            super().__init__()
+            self.hub_model = hub_model
+
+        @tf.function(input_signature=[
+            tf.TensorSpec(shape=[1, CONTENT_SIZE, CONTENT_SIZE, 3], dtype=tf.float32),
+            tf.TensorSpec(shape=[1, STYLE_SIZE, STYLE_SIZE, 3], dtype=tf.float32),
+        ])
+        def __call__(self, content_image, style_image):
+            return self.hub_model(content_image, style_image)[0]
+
+    module = StylizeModule(hub_model)
+    tf.saved_model.save(module, saved_model_dir)
+    print(f"  Saved to {saved_model_dir}")
+
+    # Convert to CoreML
+    print("\nConverting to CoreML...")
     mlmodel = ct.convert(
-        concrete,
-        inputs=[ct.ImageType(
-            name="style_image",
-            shape=(1, STYLE_IMAGE_SIZE, STYLE_IMAGE_SIZE, 3),
-            scale=1.0 / 255.0,
-            color_layout="RGB",
-        )],
-        outputs=[ct.TensorType(name="style_vector")],
-        minimum_deployment_target=ct.target.iOS16,
-    )
-
-    out_path = os.path.join(OUTPUT_DIR, "StylePredictor.mlpackage")
-    if os.path.exists(out_path):
-        shutil.rmtree(out_path)
-    mlmodel.save(out_path)
-    print(f"Saved: {out_path}")
-    return out_path
-
-
-def export_style_transfer(model):
-    """
-    Extract and convert the style transfer network.
-    Input: content image [1, H, W, 3] float32 (0-1) + style vector [1, 1, 1, 100]
-    Output: stylized image [1, H, W, 3] float32 (0-1)
-    """
-    print("\n--- Converting Style Transfer Network ---")
-
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=[1, CONTENT_IMAGE_SIZE, CONTENT_IMAGE_SIZE, 3], dtype=tf.float32),
-        tf.TensorSpec(shape=[1, 1, 1, 100], dtype=tf.float32),
-    ])
-    def transfer_style(content_image, style_vector):
-        # The model's __call__ accepts (content, style_image) but we can also
-        # call the internal transfer with a pre-computed style vector.
-        # For the hub model v2, we use the signature that accepts bottleneck directly.
-        stylized = model.signatures["serving_default"](
-            tf.constant(content_image),
-            tf.constant(style_vector),
-        )
-        # Output key varies; try common ones
-        for key in ["output_0", "stylized_image"]:
-            if key in stylized:
-                return stylized[key]
-        return list(stylized.values())[0]
-
-    # Fallback: use the simpler approach with the callable model
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=[1, CONTENT_IMAGE_SIZE, CONTENT_IMAGE_SIZE, 3], dtype=tf.float32),
-        tf.TensorSpec(shape=[1, STYLE_IMAGE_SIZE, STYLE_IMAGE_SIZE, 3], dtype=tf.float32),
-    ])
-    def transfer_full(content_image, style_image):
-        return model(content_image, style_image)[0]
-
-    try:
-        concrete = transfer_style.get_concrete_function()
-        input_specs = [
+        saved_model_dir,
+        source="tensorflow",
+        inputs=[
             ct.ImageType(
                 name="content_image",
-                shape=(1, CONTENT_IMAGE_SIZE, CONTENT_IMAGE_SIZE, 3),
-                scale=1.0 / 255.0,
-                color_layout="RGB",
-            ),
-            ct.TensorType(name="style_vector", shape=(1, 1, 1, 100)),
-        ]
-    except Exception as e:
-        print(f"Style vector approach failed ({e}), falling back to full model...")
-        concrete = transfer_full.get_concrete_function()
-        input_specs = [
-            ct.ImageType(
-                name="content_image",
-                shape=(1, CONTENT_IMAGE_SIZE, CONTENT_IMAGE_SIZE, 3),
+                shape=(1, CONTENT_SIZE, CONTENT_SIZE, 3),
                 scale=1.0 / 255.0,
                 color_layout="RGB",
             ),
             ct.ImageType(
                 name="style_image",
-                shape=(1, STYLE_IMAGE_SIZE, STYLE_IMAGE_SIZE, 3),
+                shape=(1, STYLE_SIZE, STYLE_SIZE, 3),
                 scale=1.0 / 255.0,
                 color_layout="RGB",
             ),
-        ]
-
-    mlmodel = ct.convert(
-        concrete,
-        inputs=input_specs,
-        outputs=[ct.ImageType(name="stylized_image", color_layout="RGB")],
+        ],
         minimum_deployment_target=ct.target.iOS16,
     )
+
+    # Clean up temp SavedModel
+    shutil.rmtree(saved_model_dir)
 
     out_path = os.path.join(OUTPUT_DIR, "StyleTransfer.mlpackage")
     if os.path.exists(out_path):
         shutil.rmtree(out_path)
     mlmodel.save(out_path)
-    print(f"Saved: {out_path}")
-    return out_path
+    print(f"\nSaved: {out_path}")
 
+    # Print model info
+    spec = mlmodel.get_spec()
+    print(f"  Inputs:  {[i.name for i in spec.description.input]}")
+    print(f"  Outputs: {[o.name for o in spec.description.output]}")
 
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    model = download_model()
-    export_style_predictor(model)
-    export_style_transfer(model)
     print("\n✓ Conversion complete!")
-    print(f"  Copy .mlpackage files from {OUTPUT_DIR}/ to mobile/ios/Runner/Models/")
+    print(f"  Copy {out_path} to mobile/ios/Runner/Models/")
 
 
 if __name__ == "__main__":

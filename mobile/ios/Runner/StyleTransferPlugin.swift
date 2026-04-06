@@ -184,15 +184,17 @@ class StyleTransferPlugin: NSObject, FlutterPlugin {
 
         let output = try model.prediction(from: input)
 
-        // Extract output image
-        if let pixelBuffer = output.featureValue(for: "stylized_image")?.imageBufferValue {
-            return pixelBufferToCGImage(pixelBuffer)
-        }
-
-        // Try other common output names
-        for name in output.featureNames {
-            if let pb = output.featureValue(for: name)?.imageBufferValue {
-                return pixelBufferToCGImage(pb)
+        // Try to extract output as pixel buffer (image) or multiarray (tensor)
+        for name in ["stylized_image", "Identity"] + Array(output.featureNames) {
+            if let fv = output.featureValue(for: name) {
+                // Case 1: output is an image (CVPixelBuffer)
+                if let pb = fv.imageBufferValue {
+                    return pixelBufferToCGImage(pb)
+                }
+                // Case 2: output is a MultiArray (float tensor)
+                if let ma = fv.multiArrayValue {
+                    return multiArrayToCGImage(ma, width: contentSize, height: contentSize)
+                }
             }
         }
 
@@ -254,6 +256,36 @@ class StyleTransferPlugin: NSObject, FlutterPlugin {
     private func pixelBufferToCGImage(_ pixelBuffer: CVPixelBuffer) -> CGImage {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         return ciContext.createCGImage(ciImage, from: ciImage.extent)!
+    }
+
+    /// Convert MLMultiArray [1, H, W, 3] float (0-1 range) to CGImage
+    private func multiArrayToCGImage(_ array: MLMultiArray, width: Int, height: Int) -> CGImage {
+        let count = width * height
+        var pixels = [UInt8](repeating: 0, count: count * 4) // RGBA
+
+        let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: array.count)
+
+        for i in 0..<count {
+            let r = UInt8(min(max(ptr[i * 3 + 0], 0), 1) * 255)
+            let g = UInt8(min(max(ptr[i * 3 + 1], 0), 1) * 255)
+            let b = UInt8(min(max(ptr[i * 3 + 2], 0), 1) * 255)
+            pixels[i * 4 + 0] = r
+            pixels[i * 4 + 1] = g
+            pixels[i * 4 + 2] = b
+            pixels[i * 4 + 3] = 255
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        )!
+        return context.makeImage()!
     }
 
     private func cgImageToJpeg(_ image: CGImage, quality: Int) -> Data {

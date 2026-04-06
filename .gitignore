@@ -17,6 +17,9 @@ build/
 
 # Models (large files - download separately)
 server/models/
+mobile/ios/Runner/Models/
+tools/output/
+tools/.venv/
 *.safetensors
 *.ckpt
 *.bin
