@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+
+# Models (large files - download separately)
+server/models/
+mobile/ios/Runner/StyleTransfer.mlpackage
+tools/output/
+tools/.venv/
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+*.pth
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+docker/data/
+
+# fvm
+mobile/.fvm/flutter_sdk
+mobile/.fvm/versions
+
+# Flutter
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/debug.keystore
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/*.iml
+mobile/pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Test artifacts
+*.coverage
+htmlcov/
+.tox/

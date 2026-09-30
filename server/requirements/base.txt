@@ -1,0 +1,6 @@
+fastapi>=0.111
+uvicorn[standard]>=0.29
+websockets>=12
+Pillow>=10
+numpy>=1.26
+opencv-python-headless>=4.9
